@@ -10,8 +10,6 @@ const baseTags = {
 };
 
 const config = new pulumi.Config();
-const hasuraEngineServiceName = config.require("hasuraEngineServiceName");
-const hasuraEngineServicePort = config.get("hasuraEngineServicePort") || 8080;
 const maintainer = config.require("maintainer");
 
 const networkingStack = new pulumi.StackReference(`${maintainer}/relation-networking/${stack}`);
@@ -87,16 +85,9 @@ const replicationGroup = new aws.elasticache.ReplicationGroup(baseTags.Name, {
     description: "hasura cache's redis replication group",
 });
 
-
-export const ecrRepositoryInfo = {
-    name: ecrRepository.name,
-    url: ecrRepository.repositoryUrl,
-};
-
-export const hasuraEngine = {
-    secretId: hasuraEngineStack.getOutput("hasuraEngineSecretId"),
-    serviceName: hasuraEngineServiceName,
-    servicePort: hasuraEngineServicePort,
-};
-
+export const ecrRepositoryName = ecrRepository.name;
+export const ecrRepositoryUrl = ecrRepository.repositoryUrl;
+export const hasuraEngineSecretId = hasuraEngineStack.getOutput("hasuraEngineSecretId");
+export const hasuraEngineServiceName = config.require("hasuraEngineServiceName");
+export const hasuraEngineServicePort = config.get("hasuraEngineServicePort") || 8080;
 export const redisClusterEndpoint = replicationGroup.configurationEndpointAddress;
