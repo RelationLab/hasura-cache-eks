@@ -72,16 +72,14 @@ const cacheClusterSubnets = new aws.elasticache.SubnetGroup(baseTags.Name, {
     tags: baseTags,
 });
 
-
-const replicationGroup = new aws.elasticache.ReplicationGroup(baseTags.Name, {
+const redisReplicationGroup = new aws.elasticache.ReplicationGroup(baseTags.Name, {
     engine: "redis",
+    applyImmediately: true,
     automaticFailoverEnabled: true,
     nodeType: "cache.m6g.large",
     parameterGroupName: "default.redis6.x.cluster.on",
-    numCacheClusters: 3,
+    numCacheClusters: 2,
     port: 6379,
-    subnetGroupName: cacheClusterSubnets.id,
-    securityGroupIds: [peeredSecurityGroup.id],
     description: "hasura cache's redis replication group",
 });
 
@@ -90,4 +88,4 @@ export const ecrRepositoryUrl = ecrRepository.repositoryUrl;
 export const hasuraEngineSecretId = hasuraEngineStack.getOutput("hasuraEngineSecretId");
 export const hasuraEngineServiceName = config.require("hasuraEngineServiceName");
 export const hasuraEngineServicePort = config.get("hasuraEngineServicePort") || 8080;
-export const redisClusterEndpoint = replicationGroup.configurationEndpointAddress;
+export const redisClusterEndpoint = redisReplicationGroup.configurationEndpointAddress;

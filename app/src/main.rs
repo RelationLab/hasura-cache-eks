@@ -24,9 +24,10 @@ enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_message) = match self {
-            AppError::RedisError(ref error) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
-            }
+            AppError::RedisError(ref error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("code: {:?}, category: {}", error.code(), error.category()),
+            ),
             AppError::ReqwestError(ref error) => (StatusCode::BAD_GATEWAY, error.to_string()),
             AppError::ResponseNotJson => (
                 StatusCode::INTERNAL_SERVER_ERROR,

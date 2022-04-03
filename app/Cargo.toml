@@ -13,5 +13,5 @@ hmac-sha256 = "1.1"
 reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-redis = { version = "0.21", features = ["cluster", "connection-manager", "tokio-comp"] }
+redis = { version = "0.21", features = ["connection-manager", "tokio-comp"] }
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
