@@ -1,19 +1,44 @@
 use std::{env, net::SocketAddr, sync::Arc};
 
 use async_trait::async_trait;
-use axum::extract::rejection::JsonRejection;
 use axum::{
     body::HttpBody,
-    extract::{Extension, FromRequest, Json, RequestParts},
+    extract::{rejection::JsonRejection, Extension, FromRequest, Json, RequestParts},
     http::StatusCode,
+    response::{IntoResponse, Response},
     routing::{get, post},
     BoxError, Router,
 };
 use hmac_sha256::Hash;
-use redis::{aio::ConnectionManager, AsyncCommands};
+use redis::{aio::ConnectionManager, AsyncCommands, RedisError};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
+
+enum AppError {
+    RedisError(RedisError),
+    ReqwestError(reqwest::Error),
+    ResponseNotJson,
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let (status, error_message) = match self {
+            AppError::RedisError(ref error) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+            }
+            AppError::ReqwestError(ref error) => (StatusCode::BAD_GATEWAY, error.to_string()),
+            AppError::ResponseNotJson => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                String::from("hasura engine's response is not json"),
+            ),
+        };
+        let body = Json(json!({
+            "error": error_message,
+        }));
+        (status, body).into_response()
+    }
+}
 
 struct HasuraReverseProxy {
     host: String,
@@ -24,15 +49,16 @@ struct HasuraReverseProxy {
 
 impl HasuraReverseProxy {
     fn new() -> HasuraReverseProxy {
-        let host = env::var("HASURA_HOST").expect("HASURA_HOST env var should be specified");
+        let host =
+            env::var("HASURA_ENGINE_HOST").expect("HASURA_ENGINE_HOST env var should be specified");
 
-        let port: u16 = env::var("HASURA_PORT")
-            .expect("HASURA_PORT env var should be specified")
+        let port: u16 = env::var("HASURA_ENGINE_PORT")
+            .expect("HASURA_ENGINE_PORT env var should be specified")
             .parse()
-            .expect("HASURA_PORT env var should be number");
+            .expect("HASURA_ENGINE_PORT env var should be number");
 
-        let admin_secret = env::var("HASURA_ADMIN_SECRET")
-            .expect("HASURA_ADMIN_SECRET env var should be specified");
+        let admin_secret = env::var("HASURA_ENGINE_ADMIN_SECRET")
+            .expect("HASURA_ENGINE_ADMIN_SECRET env var should be specified");
 
         HasuraReverseProxy {
             host,
@@ -87,15 +113,15 @@ async fn post_graphql(
     graphql: GraphQLCache,
     Extension(redis): Extension<ConnectionManager>,
     Extension(proxy): Extension<Arc<HasuraReverseProxy>>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<Value>, AppError> {
     let cache: Option<String> = redis
         .clone()
         .get(&graphql.hash)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(AppError::RedisError)?;
 
     let json_response = if let Some(cache) = cache {
-       serde_json::from_str(&cache).unwrap()
+        serde_json::from_str(&cache).unwrap()
     } else {
         let response = proxy
             .client
@@ -104,12 +130,12 @@ async fn post_graphql(
             .json(&graphql.req.as_json())
             .send()
             .await
-            .map_err(|_| StatusCode::BAD_GATEWAY)?;
+            .map_err(AppError::ReqwestError)?;
 
         let json_response = response
             .json::<Value>()
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|_| AppError::ResponseNotJson)?;
 
         let cached = serde_json::to_string(&json_response).unwrap();
 
@@ -139,13 +165,13 @@ async fn main() {
         .await
         .expect("Can't get connection manager");
 
-    let hasura_reverse_proxy = HasuraReverseProxy::new();
+    let hasura_engine_reverse_proxy = HasuraReverseProxy::new();
 
     let app = Router::new()
         .route("/health", get(health))
         .route("/v1/graphql", post(post_graphql))
         .layer(Extension(redis_connection_manager))
-        .layer(Extension(Arc::new(hasura_reverse_proxy)));
+        .layer(Extension(Arc::new(hasura_engine_reverse_proxy)));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 80));
 
