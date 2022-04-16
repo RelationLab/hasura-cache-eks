@@ -6,7 +6,7 @@ const stack = pulumi.getStack();
 const baseTags = {
     Name: `hasura-cache-${stack}`,
     Project: "Relation",
-    PulumiStack: `Pulumi-${pulumi.getStack()}`
+    PulumiStack: `Pulumi-${stack}`
 };
 
 const config = new pulumi.Config();
@@ -80,6 +80,8 @@ const redisReplicationGroup = new aws.elasticache.ReplicationGroup(baseTags.Name
     parameterGroupName: "default.redis6.x.cluster.on",
     numCacheClusters: 2,
     port: 6379,
+    subnetGroupName: cacheClusterSubnets.name,
+    securityGroupIds: [peeredSecurityGroup.id],
     description: "hasura cache's redis replication group",
 });
 
