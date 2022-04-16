@@ -10,7 +10,8 @@ use axum::{
     BoxError, Router,
 };
 use hmac_sha256::Hash;
-use redis::{aio::ConnectionManager, AsyncCommands, RedisError};
+use r2d2::ManageConnection;
+use redis::{cluster::ClusterClient, Commands, RedisError};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -112,13 +113,13 @@ where
 
 async fn post_graphql(
     graphql: GraphQLCache,
-    Extension(redis): Extension<ConnectionManager>,
+    Extension(redis_cluster): Extension<ClusterClient>,
     Extension(proxy): Extension<Arc<HasuraReverseProxy>>,
 ) -> Result<Json<Value>, AppError> {
-    let cache: Option<String> = redis
-        .clone()
+    let mut redis_conn = redis_cluster.connect().map_err(AppError::RedisError)?;
+
+    let cache: Option<String> = redis_conn
         .get(&graphql.hash)
-        .await
         .map_err(AppError::RedisError)?;
 
     let json_response = if let Some(cache) = cache {
@@ -141,10 +142,8 @@ async fn post_graphql(
         let cached = serde_json::to_string(&json_response).unwrap();
 
         tokio::spawn(async move {
-            redis
-                .clone()
+            redis_conn
                 .set_ex::<_, _, ()>(graphql.hash, cached, 300)
-                .await
                 .unwrap();
         });
 
@@ -157,21 +156,15 @@ async fn post_graphql(
 #[tokio::main]
 async fn main() {
     let redis_host = env::var("REDIS_HOST").expect("REDIS_HOST env var should be specified");
-
-    let redis_client =
-        redis::Client::open(format!("redis://{}/", redis_host)).expect("Can't open redis client");
-
-    let redis_connection_manager = redis_client
-        .get_tokio_connection_manager()
-        .await
-        .expect("Can't get connection manager");
+    let redis_cluster = ClusterClient::open(vec![format!("redis://{}/", redis_host)])
+        .expect("Can't open redis cluster client");
 
     let hasura_engine_reverse_proxy = HasuraReverseProxy::new();
 
     let app = Router::new()
         .route("/health", get(health))
         .route("/v1/graphql", post(post_graphql))
-        .layer(Extension(redis_connection_manager))
+        .layer(Extension(redis_cluster))
         .layer(Extension(Arc::new(hasura_engine_reverse_proxy)));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 80));
