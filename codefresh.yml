@@ -1,0 +1,84 @@
+# More examples of Codefresh YAML can be found at
+# https://codefresh.io/docs/docs/yaml-examples/examples/
+
+version: "1.0"
+# Stages can help you organize your steps in stages
+stages:
+  - "clone"
+  - "pulumiInstall"
+  - "pulumiUp"
+  - "buildImage"
+  - "fetchSecrets"
+  - "deployHelm"
+
+steps:
+  clone:
+    title: "Cloning repository"
+    type: "git-clone"
+    repo: "RelationLab/relation-hasura-cache-eks"
+    # CF_BRANCH value is auto set when pipeline is triggered
+    # Learn more at codefresh.io/docs/docs/codefresh-yaml/variables/
+    revision: "${{CF_BRANCH}}"
+    git: "github"
+    stage: "clone"
+
+  pulumiInstall:
+    title: "Pulumi Install"
+    image: "node:lts-slim"
+    working_directory: "${{clone}}"
+    commands:
+      - npm install
+
+  pulumiUp:
+    title: "Pulumi Up"
+    image: "pulumi/pulumi"
+    working_directory: "${{clone}}"
+    commands:
+      - pulumi login
+      - pulumi stack select dev
+      # (Optional) Use pulumi stack to get more information in CI/CD logs about the current stack
+      - pulumi stack
+      - pulumi up --non-interactive --yes
+      - cf_export AWS_ECR_REPO_NAME=$(pulumi stack output ecrRepositoryName)
+      - cf_export AWS_ECR_REPO_URL=$(pulumi stack output ecrRepositoryUrl)
+      - cf_export HASURA_ENGINE_SECRET_ID=$(pulumi stack output hasuraEngineSecretId)
+      - cf_export HASURA_ENGINE_SERVICE_NAME=$(pulumi stack output hasuraEngineServiceName)
+      - cf_export HASURA_ENGINE_SERVICE_PORT=$(pulumi stack output hasuraEngineServicePort)
+      - cf_export AWS_REDIS_CLUSTER_ENDPOINT=$(pulumi stack output redisClusterEndpoint)
+
+  buildImage:
+    title: "Building Docker image"
+    type: "build"
+    image_name: "${{AWS_ECR_REPO_NAME}}"
+    working_directory: "${{clone}}/app"
+    dockerfile: "Dockerfile"
+    tag: '${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}'
+
+  fetchSecrets:
+    title: "Fetch AWS Secrets"
+    type: aws-secrets-manager
+    arguments:
+      AWS_DEFAULT_REGION: "${{AWS_DEFAULT_REGION}}"
+      secrets:
+        - secret_arn: "${{HASURA_ENGINE_SECRET_ID}}"
+          key: "hasuraAdminSecret"
+          store_in: HASURA_ENGINE_ADMIN_SECRET
+
+  helmDeploy:
+    title: "Deploy helm to AWS EKS"
+    type: helm
+    working_directory: "${{clone}}"
+    arguments:
+      chart_name: helm
+      release_name: hasura-cache
+      helm_version: 3.6.1
+      cmd_ps: --create-namespace
+      namespace: relation
+      kube_context: relation-eks-dev
+      custom_values:
+        - "image_repository=${{AWS_ECR_REPO_URL}}"
+        - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
+        - "hasuraEngine_host=${{HASURA_ENGINE_SERVICE_NAME}}"
+        - "hasuraEngine_port=${{HASURA_ENGINE_SERVICE_PORT}}"
+        - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET}}"
+        - "redisCluster_endpoint=${{AWS_REDIS_CLUSTER_ENDPOINT}}"
