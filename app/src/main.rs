@@ -162,7 +162,7 @@ async fn main() {
     let hasura_engine_reverse_proxy = HasuraReverseProxy::new();
 
     let app = Router::new()
-        .route("/health", get(health))
+        .route("/healthz", get(health))
         .route("/v1/graphql", post(post_graphql))
         .layer(Extension(redis_cluster))
         .layer(Extension(Arc::new(hasura_engine_reverse_proxy)));
