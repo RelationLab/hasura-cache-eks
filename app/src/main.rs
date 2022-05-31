@@ -9,6 +9,7 @@ use axum::{
     routing::{get, post},
     BoxError, Router,
 };
+use bytes::BytesMut;
 use hmac_sha256::Hash;
 use r2d2::ManageConnection;
 use redis::{cluster::ClusterClient, Commands, RedisError};
@@ -82,8 +83,7 @@ struct GraphQLCache {
 #[derive(Debug, Deserialize, Serialize)]
 struct GraphQLRequest {
     query: String,
-    #[serde(flatten)]
-    value: Value,
+    variables: Value,
 }
 
 impl GraphQLRequest {
@@ -102,10 +102,15 @@ where
     type Rejection = JsonRejection;
 
     async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
+        let mut bytes = BytesMut::with_capacity(1024);
+
         Json::from_request(req)
             .await
             .map(|Json(req): Json<GraphQLRequest>| {
-                let hash = faster_hex::hex_string(&Hash::hash(req.query.as_bytes())[..]);
+                bytes.extend_from_slice(req.query.as_bytes());
+                let variables_bytes = serde_json::to_vec(&req.variables).unwrap();
+                bytes.extend(variables_bytes);
+                let hash = faster_hex::hex_string(&Hash::hash(&bytes)[..]);
                 GraphQLCache { hash, req }
             })
     }
