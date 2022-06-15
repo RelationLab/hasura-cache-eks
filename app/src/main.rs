@@ -144,13 +144,15 @@ async fn post_graphql(
             .await
             .map_err(|_| AppError::ResponseNotJson)?;
 
-        let cached = serde_json::to_string(&json_response).unwrap();
+        if json_response.pointer("/errors").is_none() {
+            let cached = serde_json::to_string(&json_response).unwrap();
 
-        tokio::spawn(async move {
-            redis_conn
-                .set_ex::<_, _, ()>(graphql.hash, cached, 300)
-                .unwrap();
-        });
+            tokio::spawn(async move {
+                redis_conn
+                    .set_ex::<_, _, ()>(graphql.hash, cached, 300)
+                    .unwrap();
+            });
+        }
 
         json_response
     };
