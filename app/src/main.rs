@@ -128,6 +128,7 @@ async fn post_graphql(
         .map_err(AppError::RedisError)?;
 
     let json_response = if let Some(cache) = cache {
+        println!("hit cache: {}", cache);
         serde_json::from_str(&cache).unwrap()
     } else {
         let response = proxy
