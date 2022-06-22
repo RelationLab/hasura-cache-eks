@@ -17,6 +17,8 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+const CACHE_BLACK_LIST: [&str; 1] = ["LabelDescribe"];
+
 enum AppError {
     RedisError(RedisError),
     ReqwestError(reqwest::Error),
@@ -84,6 +86,8 @@ struct GraphQLCache {
 struct GraphQLRequest {
     query: String,
     variables: Value,
+    #[serde(rename = "operationName")]
+    operation_name: Option<String>,
 }
 
 impl GraphQLRequest {
@@ -128,7 +132,6 @@ async fn post_graphql(
         .map_err(AppError::RedisError)?;
 
     let json_response = if let Some(cache) = cache {
-        println!("hit cache: {}", cache);
         serde_json::from_str(&cache).unwrap()
     } else {
         let response = proxy
@@ -145,9 +148,10 @@ async fn post_graphql(
             .await
             .map_err(|_| AppError::ResponseNotJson)?;
 
-        if json_response.pointer("/errors").is_none() {
+        if json_response.pointer("/errors").is_none()
+            && !CACHE_BLACK_LIST.contains(&graphql.req.operation_name.as_deref().unwrap_or(""))
+        {
             let cached = serde_json::to_string(&json_response).unwrap();
-
             tokio::spawn(async move {
                 redis_conn
                     .set_ex::<_, _, ()>(graphql.hash, cached, 300)
