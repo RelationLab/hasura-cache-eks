@@ -85,7 +85,8 @@ struct GraphQLCache {
 #[derive(Debug, Deserialize, Serialize)]
 struct GraphQLRequest {
     query: String,
-    variables: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    variables: Option<Value>,
     #[serde(rename = "operationName")]
     operation_name: Option<String>,
 }
