@@ -17,7 +17,12 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-const CACHE_BLACK_LIST: [&str; 3] = ["FriendsAction", "FriendsRequestAction", "LabelDescribe"];
+const CACHE_BLACK_LIST: [&str; 4] = [
+    "FriendsAction",
+    "FriendsRequestAction",
+    "LabelDescribe",
+    "QueryByAddressAction",
+];
 
 enum AppError {
     RedisError(RedisError),
