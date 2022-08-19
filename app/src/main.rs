@@ -165,8 +165,7 @@ async fn post_graphql(
 
             if json_response.pointer("/errors").is_none() {
                 let cached = serde_json::to_string(&json_response).unwrap();
-                tx.send((redis_conn, graphql.hash, cached))
-                    .unwrap();
+                tx.send((redis_conn, graphql.hash, cached)).unwrap();
             }
 
             Ok(Json(json_response))
@@ -189,9 +188,9 @@ async fn main() {
 
     let hasura_engine_reverse_proxy = HasuraReverseProxy::new();
 
-    let (tx, rx) = channel::bounded::<(ClusterConnection, String, String)>(256);
+    let (tx, rx) = channel::bounded::<(ClusterConnection, String, String)>(2048);
 
-    for _ in 0..4 {
+    for _ in 0..8 {
         let rx = rx.clone();
         thread::spawn(move || {
             while let Ok((mut conn, hash, cache)) = rx.recv() {
