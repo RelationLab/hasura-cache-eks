@@ -5,10 +5,8 @@ version: "1.0"
 # Stages can help you organize your steps in stages
 stages:
   - "clone"
-  - "pulumiInstall"
   - "pulumiUp"
-  - "buildImage"
-  - "fetchSecrets"
+  - "buildArtifacts"
   - "deployHelm"
 
 steps:
@@ -22,18 +20,12 @@ steps:
     git: "github"
     stage: "clone"
 
-  pulumiInstall:
-    title: "Pulumi Install"
-    image: "node:lts-slim"
-    working_directory: "${{clone}}"
-    commands:
-      - npm install
-
   pulumiUp:
     title: "Pulumi Up"
     image: "pulumi/pulumi"
     working_directory: "${{clone}}"
     commands:
+      - npm install
       - pulumi login
       - pulumi stack select dev
       # (Optional) Use pulumi stack to get more information in CI/CD logs about the current stack
@@ -46,23 +38,27 @@ steps:
       - cf_export HASURA_ENGINE_SERVICE_PORT=$(pulumi stack output hasuraEngineServicePort)
       - cf_export AWS_REDIS_CLUSTER_ENDPOINT=$(pulumi stack output redisClusterEndpoint)
 
-  buildImage:
-    title: "Building Docker image"
-    type: "build"
-    image_name: "${{AWS_ECR_REPO_NAME}}"
-    working_directory: "${{clone}}/app"
-    dockerfile: "Dockerfile"
-    tag: '${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}'
 
-  fetchSecrets:
-    title: "Fetch AWS Secrets"
-    type: aws-secrets-manager
-    arguments:
-      AWS_DEFAULT_REGION: "${{AWS_DEFAULT_REGION}}"
-      secrets:
-        - secret_arn: "${{HASURA_ENGINE_SECRET_ID}}"
-          key: "hasuraAdminSecret"
-          store_in: HASURA_ENGINE_ADMIN_SECRET
+  buildArtifacts:
+    type: parallel
+    stage: "buildArtifacts"
+    steps:
+        buildImage:
+          title: "Building Docker image"
+          type: "build"
+          image_name: "${{AWS_ECR_REPO_NAME}}"
+          working_directory: "${{clone}}/app"
+          dockerfile: "Dockerfile"
+          tag: '${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}'
+        fetchSecrets:
+          title: "Fetch AWS Secrets"
+          type: aws-secrets-manager
+          arguments:
+            AWS_DEFAULT_REGION: "${{AWS_DEFAULT_REGION}}"
+            secrets:
+              - secret_arn: "${{HASURA_ENGINE_SECRET_ID}}"
+                key: "hasuraAdminSecret"
+                store_in: HASURA_ENGINE_ADMIN_SECRET
 
   helmDeploy:
     title: "Deploy helm to AWS EKS"
