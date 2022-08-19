@@ -10,12 +10,17 @@ use axum::{
     BoxError, Router,
 };
 use bytes::BytesMut;
+use futures_util::TryFutureExt;
 use hmac_sha256::Hash;
 use r2d2::ManageConnection;
-use redis::{cluster::ClusterClient, Commands, RedisError};
+use redis::{
+    cluster::{ClusterClient, ClusterConnection},
+    Commands, RedisError,
+};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tokio::sync::mpsc::{self, UnboundedSender};
 
 const CACHE_BLACK_LIST: [&str; 4] = [
     "FriendsAction",
@@ -24,10 +29,12 @@ const CACHE_BLACK_LIST: [&str; 4] = [
     "QueryByAddressAction",
 ];
 
+#[derive(Debug, thiserror::Error)]
 enum AppError {
-    RedisError(RedisError),
-    ReqwestError(reqwest::Error),
-    ResponseNotJson,
+    #[error("redis error: `{0}`")]
+    RedisError(#[from] RedisError),
+    #[error("reqwest error: `{0}`")]
+    ReqwestError(#[from] reqwest::Error),
 }
 
 impl IntoResponse for AppError {
@@ -38,10 +45,6 @@ impl IntoResponse for AppError {
                 format!("code: {:?}, category: {}", error.code(), error.category()),
             ),
             AppError::ReqwestError(ref error) => (StatusCode::BAD_GATEWAY, error.to_string()),
-            AppError::ResponseNotJson => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                String::from("hasura engine's response is not json"),
-            ),
         };
         let body = Json(json!({
             "error": error_message,
@@ -77,6 +80,15 @@ impl HasuraReverseProxy {
             client: Client::new(),
         }
     }
+
+    async fn post_graphql(&self, graphql: Value) -> Result<reqwest::Response, reqwest::Error> {
+        self.client
+            .post(format!("http://{}:{}/v1/graphql", self.host, self.port))
+            .header("x-hasura-admin-secret", &self.admin_secret)
+            .json(&graphql)
+            .send()
+            .await
+    }
 }
 
 async fn health() {}
@@ -99,6 +111,13 @@ struct GraphQLRequest {
 impl GraphQLRequest {
     fn as_json(&self) -> Value {
         serde_json::to_value(self).unwrap()
+    }
+
+    fn cached(&self) -> bool {
+        self.operation_name
+            .as_deref()
+            .map(|ref operation_name| !CACHE_BLACK_LIST.contains(operation_name))
+            .unwrap_or(false)
     }
 }
 
@@ -130,45 +149,37 @@ async fn post_graphql(
     graphql: GraphQLCache,
     Extension(redis_cluster): Extension<ClusterClient>,
     Extension(proxy): Extension<Arc<HasuraReverseProxy>>,
+    Extension(tx): Extension<UnboundedSender<(ClusterConnection, String, String)>>,
 ) -> Result<Json<Value>, AppError> {
-    let mut redis_conn = redis_cluster.connect().map_err(AppError::RedisError)?;
+    if graphql.req.cached() {
+        let mut redis_conn = redis_cluster.connect()?;
 
-    let cache: Option<String> = redis_conn
-        .get(&graphql.hash)
-        .map_err(AppError::RedisError)?;
+        let cache: Option<String> = redis_conn.get(&graphql.hash)?;
 
-    let json_response = if let Some(cache) = cache {
-        serde_json::from_str(&cache).unwrap()
-    } else {
-        let response = proxy
-            .client
-            .post(format!("http://{}:{}/v1/graphql", proxy.host, proxy.port))
-            .header("x-hasura-admin-secret", &proxy.admin_secret)
-            .json(&graphql.req.as_json())
-            .send()
-            .await
-            .map_err(AppError::ReqwestError)?;
+        if let Some(cache) = cache {
+            Ok(Json(serde_json::from_str(&cache).unwrap()))
+        } else {
+            let response = proxy.post_graphql(graphql.req.as_json()).await?;
 
-        let json_response = response
-            .json::<Value>()
-            .await
-            .map_err(|_| AppError::ResponseNotJson)?;
+            let json_response = response.json::<Value>().await?;
 
-        if json_response.pointer("/errors").is_none()
-            && !CACHE_BLACK_LIST.contains(&graphql.req.operation_name.as_deref().unwrap_or(""))
-        {
-            let cached = serde_json::to_string(&json_response).unwrap();
-            tokio::spawn(async move {
-                redis_conn
-                    .set_ex::<_, _, ()>(graphql.hash, cached, 300)
+            if json_response.pointer("/errors").is_none() {
+                let cached = serde_json::to_string(&json_response).unwrap();
+                tx.send((redis_conn, graphql.hash, cached))
+                    .map_err(drop)
                     .unwrap();
-            });
+            }
+
+            Ok(Json(json_response))
         }
-
-        json_response
-    };
-
-    Ok(Json(json_response))
+    } else {
+        proxy
+            .post_graphql(graphql.req.as_json())
+            .and_then(|response| response.json::<Value>())
+            .await
+            .map_err(Into::into)
+            .map(Json)
+    }
 }
 
 #[tokio::main]
@@ -179,9 +190,18 @@ async fn main() {
 
     let hasura_engine_reverse_proxy = HasuraReverseProxy::new();
 
+    let (tx, mut rx) = mpsc::unbounded_channel::<(ClusterConnection, String, String)>();
+
+    tokio::spawn(async move {
+        while let Some((mut conn, hash, cache)) = rx.recv().await {
+            conn.set_ex::<_, _, ()>(hash, cache, 300).unwrap();
+        }
+    });
+
     let app = Router::new()
         .route("/healthz", get(health))
         .route("/v1/graphql", post(post_graphql))
+        .layer(Extension(tx))
         .layer(Extension(redis_cluster))
         .layer(Extension(Arc::new(hasura_engine_reverse_proxy)));
 
