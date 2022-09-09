@@ -22,12 +22,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-const CACHE_BLACK_LIST: [&str; 4] = [
-    "FriendsAction",
-    "FriendsRequestAction",
-    "LabelDescribe",
-    "QueryByAddressAction",
-];
+const CACHE_WHITE_LIST: [&str; 1] = ["AddressesWithLabels"];
 
 #[derive(Debug, thiserror::Error)]
 enum AppError {
@@ -116,7 +111,7 @@ impl GraphQLRequest {
     fn cached(&self) -> bool {
         self.operation_name
             .as_deref()
-            .map(|ref operation_name| !CACHE_BLACK_LIST.contains(operation_name))
+            .map(|ref operation_name| CACHE_WHITE_LIST.contains(operation_name))
             .unwrap_or(false)
     }
 }
