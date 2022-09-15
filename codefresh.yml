@@ -5,9 +5,10 @@ version: "1.0"
 # Stages can help you organize your steps in stages
 stages:
   - "clone"
-  - "pulumiUp"
+  - "pulumiOutput"
   - "buildArtifacts"
-  - "deployHelm"
+  - "devDeploy"
+  - "prodDeploy"
 
 steps:
   clone:
@@ -21,60 +22,79 @@ steps:
     stage: "clone"
 
   pulumiUp:
-    title: "Pulumi Up"
+    title: "Pulumi Outputs"
     image: "pulumi/pulumi"
     working_directory: "${{clone}}"
     commands:
       - npm install
       - pulumi login
       - pulumi stack select dev
-      # (Optional) Use pulumi stack to get more information in CI/CD logs about the current stack
-      - pulumi stack
-      - pulumi up --non-interactive --yes
       - cf_export AWS_ECR_REPO_NAME=$(pulumi stack output ecrRepositoryName)
       - cf_export AWS_ECR_REPO_URL=$(pulumi stack output ecrRepositoryUrl)
-      - cf_export HASURA_ENGINE_SECRET_ID=$(pulumi stack output hasuraEngineSecretId)
-      - cf_export HASURA_ENGINE_SERVICE_NAME=$(pulumi stack output hasuraEngineServiceName)
-      - cf_export HASURA_ENGINE_SERVICE_PORT=$(pulumi stack output hasuraEngineServicePort)
-      - cf_export AWS_REDIS_CLUSTER_ENDPOINT=$(pulumi stack output redisClusterEndpoint)
-
+      - cf_export HASURA_ENGINE_SECRET_ID_DEV=$(pulumi stack output hasuraEngineSecretId)
+      - cf_export AWS_REDIS_CLUSTER_ENDPOINT_DEV=$(pulumi stack output redisClusterEndpoint)
+      - pulumi stack select prod
+      - cf_export HASURA_ENGINE_SECRET_ID_PROD=$(pulumi stack output hasuraEngineSecretId)
+      - cf_export AWS_REDIS_CLUSTER_ENDPOINT_PROD=$(pulumi stack output redisClusterEndpoint)
 
   buildArtifacts:
     type: parallel
     stage: "buildArtifacts"
     steps:
-        buildImage:
-          title: "Building Docker image"
-          type: "build"
-          image_name: "${{AWS_ECR_REPO_NAME}}"
-          working_directory: "${{clone}}/app"
-          dockerfile: "Dockerfile"
-          tag: '${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}'
-        fetchSecrets:
-          title: "Fetch AWS Secrets"
-          type: aws-secrets-manager
-          arguments:
-            AWS_DEFAULT_REGION: "${{AWS_DEFAULT_REGION}}"
-            secrets:
-              - secret_arn: "${{HASURA_ENGINE_SECRET_ID}}"
-                key: "hasuraAdminSecret"
-                store_in: HASURA_ENGINE_ADMIN_SECRET
+      buildImage:
+        title: "Building Docker image"
+        type: "build"
+        image_name: "${{AWS_ECR_REPO_NAME}}"
+        working_directory: "${{clone}}/app"
+        dockerfile: "Dockerfile"
+        tag: '${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}'
+      fetchSecrets:
+        title: "Fetch AWS Secrets"
+        type: aws-secrets-manager
+        arguments:
+          AWS_DEFAULT_REGION: "${{AWS_DEFAULT_REGION}}"
+          secrets:
+            - secret_arn: "${{HASURA_ENGINE_SECRET_ID_DEV}}"
+              key: "hasuraAdminSecret"
+              store_in: HASURA_ENGINE_ADMIN_SECRET_DEV
+            - secret_arn: "${{HASURA_ENGINE_SECRET_ID_PROD}}"
+              key: "hasuraAdminSecret"
+              store_in: HASURA_ENGINE_ADMIN_SECRET_PROD
 
-  helmDeploy:
-    title: "Deploy helm to AWS EKS"
+  devDeploy:
+    title: "Deploy helm to AWS EKS development env"
     type: helm
     working_directory: "${{clone}}"
     arguments:
       chart_name: helm
       release_name: hasura-cache
       helm_version: 3.6.1
-      cmd_ps: --create-namespace
-      namespace: relation
-      kube_context: relation-eks-dev
+      namespace: development
+      kube_context: wired-prod
       custom_values:
         - "image_repository=${{AWS_ECR_REPO_URL}}"
         - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
-        - "hasuraEngine_host=${{HASURA_ENGINE_SERVICE_NAME}}"
-        - "hasuraEngine_port=${{HASURA_ENGINE_SERVICE_PORT}}"
-        - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET}}"
-        - "redisCluster_endpoint=${{AWS_REDIS_CLUSTER_ENDPOINT}}"
+        - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET_DEV}}"
+        - "redisCluster_endpoint=${{AWS_REDIS_CLUSTER_ENDPOINT_DEV}}"
+        
+  askForPermission:
+    type: pending-approval
+    stage: prodDeploy
+    title: Deploy to production?
+        
+  prodDeploy:
+    title: "Deploy helm to AWS EKS production env"
+    stage: prodDeploy
+    type: helm
+    working_directory: "${{clone}}"
+    arguments:
+      chart_name: helm
+      release_name: hasura-cache
+      helm_version: 3.6.1
+      namespace: production
+      kube_context: wired-prod
+      custom_values:
+        - "image_repository=${{AWS_ECR_REPO_URL}}"
+        - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
+        - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET_PROD}}"
+        - "redisCluster_endpoint=${{AWS_REDIS_CLUSTER_ENDPOINT_PROD}}"
