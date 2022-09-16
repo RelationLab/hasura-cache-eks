@@ -70,7 +70,7 @@ steps:
       release_name: hasura-cache
       helm_version: 3.6.1
       namespace: development
-      kube_context: wired-prod
+      kube_context: wired-eks-prod
       custom_values:
         - "image_repository=${{AWS_ECR_REPO_URL}}"
         - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
@@ -92,7 +92,7 @@ steps:
       release_name: hasura-cache
       helm_version: 3.6.1
       namespace: production
-      kube_context: wired-prod
+      kube_context: wired-eks-prod
       custom_values:
         - "image_repository=${{AWS_ECR_REPO_URL}}"
         - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
