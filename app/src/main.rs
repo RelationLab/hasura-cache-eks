@@ -22,24 +22,28 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-const CACHE_WHITE_LIST: [&str; 1] = ["AddressesWithLabels"];
+const CACHED_OPERATIONS: [&str; 1] = ["AddressesWithLabels"];
+const PUBLIC_OPERATIONS: [&str; 1] = ["QueryByAddressAction"];
 
 #[derive(Debug, thiserror::Error)]
 enum AppError {
+    #[error("privacy error")]
+    Privacy,
     #[error("redis error: `{0}`")]
-    RedisError(#[from] RedisError),
+    Redis(#[from] RedisError),
     #[error("reqwest error: `{0}`")]
-    ReqwestError(#[from] reqwest::Error),
+    Reqwest(#[from] reqwest::Error),
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_message) = match self {
-            AppError::RedisError(ref error) => (
+            AppError::Privacy => (StatusCode::FORBIDDEN, self.to_string()),
+            AppError::Redis(ref error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("code: {:?}, category: {}", error.code(), error.category()),
             ),
-            AppError::ReqwestError(ref error) => (StatusCode::BAD_GATEWAY, error.to_string()),
+            AppError::Reqwest(ref error) => (StatusCode::BAD_GATEWAY, error.to_string()),
         };
         let body = Json(json!({
             "error": error_message,
@@ -111,7 +115,14 @@ impl GraphQLRequest {
     fn cached(&self) -> bool {
         self.operation_name
             .as_deref()
-            .map(|ref operation_name| CACHE_WHITE_LIST.contains(operation_name))
+            .map(|ref operation_name| CACHED_OPERATIONS.contains(operation_name))
+            .unwrap_or(false)
+    }
+
+    fn is_public(&self) -> bool {
+        self.operation_name
+            .as_deref()
+            .map(|ref operation_name| PUBLIC_OPERATIONS.contains(operation_name))
             .unwrap_or(false)
     }
 }
@@ -142,9 +153,9 @@ where
 
 async fn post_graphql(
     graphql: GraphQLCache,
-    Extension(redis_cluster): Extension<ClusterClient>,
-    Extension(proxy): Extension<Arc<HasuraReverseProxy>>,
-    Extension(tx): Extension<Sender<(ClusterConnection, String, String)>>,
+    redis_cluster: ClusterClient,
+    proxy: Arc<HasuraReverseProxy>,
+    tx: Sender<(ClusterConnection, String, String)>,
 ) -> Result<Json<Value>, AppError> {
     if graphql.req.cached() {
         let mut redis_conn = redis_cluster.connect()?;
@@ -175,6 +186,28 @@ async fn post_graphql(
     }
 }
 
+async fn public_post_graphql(
+    graphql: GraphQLCache,
+    Extension(redis_cluster): Extension<ClusterClient>,
+    Extension(proxy): Extension<Arc<HasuraReverseProxy>>,
+    Extension(tx): Extension<Sender<(ClusterConnection, String, String)>>,
+) -> Result<Json<Value>, AppError> {
+    if !graphql.req.is_public() {
+        return Err(AppError::Privacy);
+    }
+
+    post_graphql(graphql, redis_cluster, proxy, tx).await
+}
+
+async fn private_post_graphql(
+    graphql: GraphQLCache,
+    Extension(redis_cluster): Extension<ClusterClient>,
+    Extension(proxy): Extension<Arc<HasuraReverseProxy>>,
+    Extension(tx): Extension<Sender<(ClusterConnection, String, String)>>,
+) -> Result<Json<Value>, AppError> {
+    post_graphql(graphql, redis_cluster, proxy, tx).await
+}
+
 #[tokio::main]
 async fn main() {
     let redis_host = env::var("REDIS_HOST").expect("REDIS_HOST env var should be specified");
@@ -196,7 +229,8 @@ async fn main() {
 
     let app = Router::new()
         .route("/healthz", get(health))
-        .route("/v1/graphql", post(post_graphql))
+        .route("/v1/graphql", post(private_post_graphql))
+        .route("/public/v1/graphql", post(public_post_graphql))
         .layer(Extension(tx))
         .layer(Extension(redis_cluster))
         .layer(Extension(Arc::new(hasura_engine_reverse_proxy)));
