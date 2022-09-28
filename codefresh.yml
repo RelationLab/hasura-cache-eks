@@ -5,9 +5,10 @@ version: "1.0"
 # Stages can help you organize your steps in stages
 stages:
   - "clone"
-  - "pulumiOutput"
-  - "buildArtifacts"
+  - "devPulumiUp"
+  - "buildAppImage"
   - "devDeploy"
+  - "stagDeploy"
   - "prodDeploy"
 
 steps:
@@ -21,49 +22,43 @@ steps:
     git: "github"
     stage: "clone"
 
-  pulumiUp:
-    title: "Pulumi Outputs"
+  devPulumiUp:
+    title: "Pulumi Dev Up"
     image: "pulumi/pulumi"
     working_directory: "${{clone}}"
     commands:
       - npm install
       - pulumi login
       - pulumi stack select dev
+      - pulumi up --non-interactive --yes
       - cf_export AWS_ECR_REPO_NAME=$(pulumi stack output ecrRepositoryName)
       - cf_export AWS_ECR_REPO_URL=$(pulumi stack output ecrRepositoryUrl)
       - cf_export HASURA_ENGINE_SECRET_ID_DEV=$(pulumi stack output hasuraEngineSecretId)
       - cf_export AWS_REDIS_CLUSTER_ENDPOINT_DEV=$(pulumi stack output redisClusterEndpoint)
-      - pulumi stack select prod
-      - cf_export HASURA_ENGINE_SECRET_ID_PROD=$(pulumi stack output hasuraEngineSecretId)
-      - cf_export AWS_REDIS_CLUSTER_ENDPOINT_PROD=$(pulumi stack output redisClusterEndpoint)
 
-  buildArtifacts:
-    type: parallel
-    stage: "buildArtifacts"
-    steps:
-      buildImage:
-        title: "Building Docker image"
-        type: "build"
-        image_name: "${{AWS_ECR_REPO_NAME}}"
-        working_directory: "${{clone}}/app"
-        dockerfile: "Dockerfile"
-        tag: '${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}'
-      fetchSecrets:
-        title: "Fetch AWS Secrets"
-        type: aws-secrets-manager
-        arguments:
-          AWS_DEFAULT_REGION: "${{AWS_DEFAULT_REGION}}"
-          secrets:
-            - secret_arn: "${{HASURA_ENGINE_SECRET_ID_DEV}}"
-              key: "hasuraAdminSecret"
-              store_in: HASURA_ENGINE_ADMIN_SECRET_DEV
-            - secret_arn: "${{HASURA_ENGINE_SECRET_ID_PROD}}"
-              key: "hasuraAdminSecret"
-              store_in: HASURA_ENGINE_ADMIN_SECRET_PROD
+  buildAppImage:
+    title: "Building App Docker image"
+    type: "build"
+    image_name: "${{AWS_ECR_REPO_NAME}}"
+    working_directory: "${{clone}}/app"
+    dockerfile: "Dockerfile"
+    tag: '${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}'
+
+  devFetchSecrets:
+    title: "Fetch Dev AWS Secrets"
+    type: aws-secrets-manager
+    stage: devDeploy
+    arguments:
+      AWS_DEFAULT_REGION: "${{AWS_DEFAULT_REGION}}"
+      secrets:
+        - secret_arn: "${{HASURA_ENGINE_SECRET_ID_DEV}}"
+          key: "hasuraAdminSecret"
+          store_in: HASURA_ENGINE_ADMIN_SECRET_DEV
 
   devDeploy:
     title: "Deploy helm to AWS EKS dev env"
     type: helm
+    stage: devDeploy
     working_directory: "${{clone}}"
     arguments:
       chart_name: helm
@@ -76,11 +71,81 @@ steps:
         - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
         - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET_DEV}}"
         - "redisCluster_endpoint=${{AWS_REDIS_CLUSTER_ENDPOINT_DEV}}"
+
+  askForStagPermission:
+    type: pending-approval
+    stage: stagDeploy
+    title: Deploy to stagging?
+
+  stagPulumiUp:
+    title: "Pulumi Stag Up"
+    image: "pulumi/pulumi"
+    working_directory: "${{clone}}"
+    stage: stagDeploy
+    commands:
+      - npm install
+      - pulumi login
+      - pulumi stack select stag
+      - pulumi up --non-interactive --yes
+      - cf_export HASURA_ENGINE_SECRET_ID_STAG=$(pulumi stack output hasuraEngineSecretId)
+      - cf_export AWS_REDIS_CLUSTER_ENDPOINT_STAG=$(pulumi stack output redisClusterEndpoint)
+
+  stagFetchSecrets:
+    title: "Fetch Stag AWS Secrets"
+    type: aws-secrets-manager
+    stage: stagDeploy
+    arguments:
+      AWS_DEFAULT_REGION: "${{AWS_DEFAULT_REGION}}"
+      secrets:
+        - secret_arn: "${{HASURA_ENGINE_SECRET_ID_STAG}}"
+          key: "hasuraAdminSecret"
+          store_in: HASURA_ENGINE_ADMIN_SECRET_STAG
+
+  stagDeploy:
+    title: "Deploy helm to AWS EKS stag env"
+    stage: stagDeploy
+    type: helm
+    working_directory: "${{clone}}"
+    arguments:
+      chart_name: helm
+      release_name: hasura-cache
+      helm_version: 3.6.1
+      namespace: stag
+      kube_context: wired-eks-prod
+      custom_values:
+        - "image_repository=${{AWS_ECR_REPO_URL}}"
+        - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
+        - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET_STAG}}"
+        - "redisCluster_endpoint=${{AWS_REDIS_CLUSTER_ENDPOINT_STAG}}"
         
-  askForPermission:
+  askForProdPermission:
     type: pending-approval
     stage: prodDeploy
     title: Deploy to production?
+
+  prodPulumiUp:
+    title: "Pulumi Prod Up"
+    image: "pulumi/pulumi"
+    working_directory: "${{clone}}"
+    stage: prodDeploy
+    commands:
+      - npm install
+      - pulumi login
+      - pulumi stack select prod
+      - pulumi up --non-interactive --yes
+      - cf_export HASURA_ENGINE_SECRET_ID_PROD=$(pulumi stack output hasuraEngineSecretId)
+      - cf_export AWS_REDIS_CLUSTER_ENDPOINT_PROD=$(pulumi stack output redisClusterEndpoint)
+
+  prodFetchSecrets:
+    title: "Fetch Prod AWS Secrets"
+    type: aws-secrets-manager
+    stage: prodDeploy
+    arguments:
+      AWS_DEFAULT_REGION: "${{AWS_DEFAULT_REGION}}"
+      secrets:
+        - secret_arn: "${{HASURA_ENGINE_SECRET_ID_PROD}}"
+          key: "hasuraAdminSecret"
+          store_in: HASURA_ENGINE_ADMIN_SECRET_PROD
         
   prodDeploy:
     title: "Deploy helm to AWS EKS prod env"

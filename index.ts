@@ -29,7 +29,7 @@ const hasuraEngineStack = new pulumi.StackReference(
 let ecrRepository;
 
 const redisConfig = {
-  nodeType: "cache.t3.medium",
+  nodeType: "cache.t3.small",
   numCacheClusters: 2,
 };
 
