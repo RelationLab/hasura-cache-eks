@@ -23,7 +23,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 const CACHED_OPERATIONS: [&str; 1] = ["AddressesWithLabels"];
-const PUBLIC_OPERATIONS: [&str; 1] = ["QueryFriendsRequestAction"];
+const PUBLIC_OPERATIONS: [&str; 3] = [
+    "FriendsRequestAction",
+    "FriendsAction",
+    "FriendsRequestCountAction",
+];
 
 #[derive(Debug, thiserror::Error)]
 enum AppError {
