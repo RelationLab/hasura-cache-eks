@@ -5,8 +5,6 @@ version: "1.0"
 # Stages can help you organize your steps in stages
 stages:
   - "clone"
-  - "devPulumiUp"
-  - "buildAppImage"
   - "devDeploy"
   - "stagDeploy"
   - "prodDeploy"
@@ -24,6 +22,7 @@ steps:
 
   devPulumiUp:
     title: "Pulumi Dev Up"
+    stage: devDeploy
     image: "pulumi/pulumi"
     working_directory: "${{clone}}"
     commands:
@@ -38,6 +37,7 @@ steps:
 
   buildAppImage:
     title: "Building App Docker image"
+    stage: devDeploy
     type: "build"
     image_name: "${{AWS_ECR_REPO_NAME}}"
     working_directory: "${{clone}}/app"
