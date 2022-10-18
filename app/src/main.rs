@@ -23,10 +23,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 const CACHED_OPERATIONS: [&str; 1] = ["AddressesWithLabels"];
-const PUBLIC_OPERATIONS: [&str; 3] = [
+const PUBLIC_OPERATIONS: [&str; 4] = [
     "FriendsRequestAction",
     "FriendsAction",
     "FriendsRequestCountAction",
+    "LabelDescribe",
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -215,7 +216,7 @@ async fn private_post_graphql(
 #[tokio::main]
 async fn main() {
     let redis_host = env::var("REDIS_HOST").expect("REDIS_HOST env var should be specified");
-    let redis_cluster = ClusterClient::open(vec![format!("redis://{}/", redis_host)])
+    let redis_cluster = ClusterClient::new(vec![format!("redis://{}/", redis_host)])
         .expect("Can't open redis cluster client");
 
     let hasura_engine_reverse_proxy = HasuraReverseProxy::new();
