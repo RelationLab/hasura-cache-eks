@@ -3,8 +3,8 @@ use std::{env, net::SocketAddr, sync::Arc, thread};
 use async_trait::async_trait;
 use axum::{
     body::HttpBody,
-    extract::{rejection::JsonRejection, Extension, FromRequest, Json, RequestParts},
-    http::StatusCode,
+    extract::{rejection::JsonRejection, Extension, FromRequest, Json},
+    http::{Request, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     BoxError, Router,
@@ -133,18 +133,19 @@ impl GraphQLRequest {
 }
 
 #[async_trait]
-impl<B> FromRequest<B> for GraphQLCache
+impl<S, B> FromRequest<S, B> for GraphQLCache
 where
-    B: Send + HttpBody,
+    B: 'static + Send + HttpBody,
     B::Data: Send,
     B::Error: Into<BoxError>,
+    S: Send + Sync,
 {
     type Rejection = JsonRejection;
 
-    async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
         let mut bytes = BytesMut::with_capacity(1024);
 
-        Json::from_request(req)
+        Json::from_request(req, state)
             .await
             .map(|Json(req): Json<GraphQLRequest>| {
                 bytes.extend_from_slice(req.query.as_bytes());
@@ -192,10 +193,10 @@ async fn post_graphql(
 }
 
 async fn public_post_graphql(
-    graphql: GraphQLCache,
+    Extension(tx): Extension<Sender<(ClusterConnection, String, String)>>,
     Extension(redis_cluster): Extension<ClusterClient>,
     Extension(proxy): Extension<Arc<HasuraReverseProxy>>,
-    Extension(tx): Extension<Sender<(ClusterConnection, String, String)>>,
+    graphql: GraphQLCache,
 ) -> Result<Json<Value>, AppError> {
     if !graphql.req.is_public() {
         return Err(AppError::Privacy);
@@ -205,10 +206,10 @@ async fn public_post_graphql(
 }
 
 async fn private_post_graphql(
-    graphql: GraphQLCache,
+    Extension(tx): Extension<Sender<(ClusterConnection, String, String)>>,
     Extension(redis_cluster): Extension<ClusterClient>,
     Extension(proxy): Extension<Arc<HasuraReverseProxy>>,
-    Extension(tx): Extension<Sender<(ClusterConnection, String, String)>>,
+    graphql: GraphQLCache,
 ) -> Result<Json<Value>, AppError> {
     post_graphql(graphql, redis_cluster, proxy, tx).await
 }
@@ -219,7 +220,7 @@ async fn main() {
     let redis_cluster = ClusterClient::new(vec![format!("redis://{}/", redis_host)])
         .expect("Can't open redis cluster client");
 
-    let hasura_engine_reverse_proxy = HasuraReverseProxy::new();
+    let hasura_engine_reverse_proxy = Arc::new(HasuraReverseProxy::new());
 
     let (tx, rx) = channel::bounded::<(ClusterConnection, String, String)>(2048);
 
@@ -238,7 +239,7 @@ async fn main() {
         .route("/public/v1/graphql", post(public_post_graphql))
         .layer(Extension(tx))
         .layer(Extension(redis_cluster))
-        .layer(Extension(Arc::new(hasura_engine_reverse_proxy)));
+        .layer(Extension(hasura_engine_reverse_proxy));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 80));
 
