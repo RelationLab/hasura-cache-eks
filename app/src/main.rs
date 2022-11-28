@@ -1,5 +1,6 @@
-use std::{env, net::SocketAddr, sync::Arc, thread};
+use std::{env, net::SocketAddr, sync::Arc};
 
+use async_channel::{bounded, Sender};
 use async_trait::async_trait;
 use axum::{
     body::HttpBody,
@@ -10,7 +11,6 @@ use axum::{
     BoxError, Router,
 };
 use bytes::BytesMut;
-use crossbeam::channel::{self, Sender};
 use futures_util::TryFutureExt;
 use hmac_sha256::Hash;
 use r2d2::ManageConnection;
@@ -177,7 +177,7 @@ async fn post_graphql(
 
             if json_response.pointer("/errors").is_none() {
                 let cached = serde_json::to_string(&json_response).unwrap();
-                tx.send((redis_conn, graphql.hash, cached)).unwrap();
+                tx.send((redis_conn, graphql.hash, cached)).await.unwrap();
             }
 
             Ok(Json(json_response))
@@ -222,12 +222,12 @@ async fn main() {
 
     let hasura_engine_reverse_proxy = Arc::new(HasuraReverseProxy::new());
 
-    let (tx, rx) = channel::bounded::<(ClusterConnection, String, String)>(2048);
+    let (tx, rx) = bounded::<(ClusterConnection, String, String)>(2048);
 
-    for _ in 0..8 {
+    for _ in 0..256 {
         let rx = rx.clone();
-        thread::spawn(move || {
-            while let Ok((mut conn, hash, cache)) = rx.recv() {
+        tokio::spawn(async move {
+            while let Ok((mut conn, hash, cache)) = rx.recv().await {
                 conn.set_ex::<_, _, ()>(hash, cache, 172800).unwrap();
             }
         });
