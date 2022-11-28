@@ -227,7 +227,7 @@ async fn main() {
         let rx = rx.clone();
         thread::spawn(move || {
             while let Ok((mut conn, hash, cache)) = rx.recv() {
-                conn.set_ex::<_, _, ()>(hash, cache, 300).unwrap();
+                conn.set_ex::<_, _, ()>(hash, cache, 172800).unwrap();
             }
         });
     }
