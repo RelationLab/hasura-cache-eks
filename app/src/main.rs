@@ -172,14 +172,11 @@ async fn post_graphql(
             Ok(Json(serde_json::from_str(&cache).unwrap()))
         } else {
             let response = proxy.post_graphql(graphql.req.as_json()).await?;
-
             let json_response = response.json::<Value>().await?;
-
             if json_response.pointer("/errors").is_none() {
                 let cached = serde_json::to_string(&json_response).unwrap();
                 tx.send((redis_conn, graphql.hash, cached)).await.unwrap();
             }
-
             Ok(Json(json_response))
         }
     } else {
