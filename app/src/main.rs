@@ -2,6 +2,7 @@ use std::{env, net::SocketAddr, sync::Arc};
 
 use async_channel::{bounded, Sender};
 use async_trait::async_trait;
+use axum::http::{HeaderMap, HeaderValue};
 use axum::{
     body::HttpBody,
     extract::{rejection::JsonRejection, Extension, FromRequest, Json},
@@ -85,9 +86,14 @@ impl HasuraReverseProxy {
         }
     }
 
-    async fn post_graphql(&self, graphql: Value) -> Result<reqwest::Response, reqwest::Error> {
+    async fn post_graphql(
+        &self,
+        headers: HeaderMap<HeaderValue>,
+        graphql: Value,
+    ) -> Result<reqwest::Response, reqwest::Error> {
         self.client
             .post(format!("http://{}:{}/v1/graphql", self.host, self.port))
+            .headers(headers)
             .header("x-hasura-admin-secret", &self.admin_secret)
             .json(&graphql)
             .send()
@@ -101,6 +107,7 @@ async fn health() {}
 struct GraphQLCache {
     hash: String,
     req: GraphQLRequest,
+    post_headers: HeaderMap<HeaderValue>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -143,8 +150,14 @@ where
     type Rejection = JsonRejection;
 
     async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
-        let mut bytes = BytesMut::with_capacity(1024);
+        let post_headers = req
+            .headers()
+            .iter()
+            .filter(|(key, _)| ["address", "authorization"].contains(&key.as_str()))
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect::<HeaderMap<HeaderValue>>();
 
+        let mut bytes = BytesMut::with_capacity(2048);
         Json::from_request(req, state)
             .await
             .map(|Json(req): Json<GraphQLRequest>| {
@@ -152,7 +165,11 @@ where
                 let variables_bytes = serde_json::to_vec(&req.variables).unwrap();
                 bytes.extend(variables_bytes);
                 let hash = faster_hex::hex_string(&Hash::hash(&bytes)[..]);
-                GraphQLCache { hash, req }
+                GraphQLCache {
+                    hash,
+                    req,
+                    post_headers,
+                }
             })
     }
 }
@@ -171,7 +188,9 @@ async fn post_graphql(
         if let Some(cache) = cache {
             Ok(Json(serde_json::from_str(&cache).unwrap()))
         } else {
-            let response = proxy.post_graphql(graphql.req.as_json()).await?;
+            let response = proxy
+                .post_graphql(graphql.post_headers, graphql.req.as_json())
+                .await?;
             let json_response = response.json::<Value>().await?;
             if json_response.pointer("/errors").is_none() {
                 let cached = serde_json::to_string(&json_response).unwrap();
@@ -181,7 +200,7 @@ async fn post_graphql(
         }
     } else {
         proxy
-            .post_graphql(graphql.req.as_json())
+            .post_graphql(graphql.post_headers, graphql.req.as_json())
             .and_then(|response| response.json::<Value>())
             .await
             .map_err(Into::into)
