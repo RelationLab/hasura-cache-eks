@@ -2,11 +2,10 @@ import * as pulumi from "@pulumi/pulumi";
 import * as aws from "@pulumi/aws";
 
 const stack = pulumi.getStack();
-
-const baseName = "hasura-cache";
+const name = "wired-hasura-cache";
 
 const baseTags = {
-  Name: `${baseName}-${stack}`,
+  Name: `${name}-${stack}`,
   Project: "Wired.network",
   PulumiStack: `Pulumi-${stack}`,
 };
@@ -17,16 +16,22 @@ const maintainer = config.require("maintainer");
 const networkingStack = new pulumi.StackReference(
   `${maintainer}/relation-networking/dev`
 );
+
 const peeredSecurityGroup = aws.ec2.SecurityGroup.get(
   "eks-vpc-data-vpc-sg",
   networkingStack.getOutput("peeredSecurityGroupId")
 );
 
+const wiredAwsEcrStackRef = aws
+  .getRegionOutput()
+  .apply(
+    (res) =>
+      new pulumi.StackReference(`${maintainer}/wired-aws-ecr/${res.name}`)
+  );
+
 const hasuraEngineStack = new pulumi.StackReference(
   `${maintainer}/relation-hasura-engine-eks/${stack}`
 );
-
-let ecrRepository;
 
 const redisConfig = {
   nodeType: "cache.t3.small",
@@ -34,74 +39,8 @@ const redisConfig = {
 };
 
 if (stack === "prod") {
-  redisConfig.nodeType = "cache.m6g.2xlarge";
+  redisConfig.nodeType = "cache.r6g.xlarge";
   redisConfig.numCacheClusters = 4;
-
-  ecrRepository = new aws.ecr.Repository(baseName, {
-    name: baseName,
-    tags: baseTags,
-  });
-
-  new aws.ecr.RepositoryPolicy(
-    baseName,
-    {
-      repository: ecrRepository.id,
-      policy: JSON.stringify({
-        Version: "2012-10-17",
-        Statement: [
-          {
-            Sid: "new policy",
-            Effect: "Allow",
-            Principal: "*",
-            Action: [
-              "ecr:GetDownloadUrlForLayer",
-              "ecr:BatchGetImage",
-              "ecr:BatchCheckLayerAvailability",
-              "ecr:PutImage",
-              "ecr:InitiateLayerUpload",
-              "ecr:UploadLayerPart",
-              "ecr:CompleteLayerUpload",
-              "ecr:DescribeRepositories",
-              "ecr:GetRepositoryPolicy",
-              "ecr:ListImages",
-              "ecr:DeleteRepository",
-              "ecr:BatchDeleteImage",
-              "ecr:SetRepositoryPolicy",
-              "ecr:DeleteRepositoryPolicy",
-            ],
-          },
-        ],
-      }),
-    },
-    { deleteBeforeReplace: true }
-  );
-
-  new aws.ecr.LifecyclePolicy(
-    baseName,
-    {
-      repository: ecrRepository.id,
-      policy: JSON.stringify({
-        rules: [
-          {
-            rulePriority: 1,
-            description: "Expire images older than 14 days",
-            selection: {
-              tagStatus: "untagged",
-              countType: "sinceImagePushed",
-              countUnit: "days",
-              countNumber: 14,
-            },
-            action: {
-              type: "expire",
-            },
-          },
-        ],
-      }),
-    },
-    { deleteBeforeReplace: true }
-  );
-} else {
-  ecrRepository = aws.ecr.Repository.get(baseName, baseName);
 }
 
 const cacheClusterSubnets = new aws.elasticache.SubnetGroup(baseTags.Name, {
@@ -116,7 +55,7 @@ const redisReplicationGroup = new aws.elasticache.ReplicationGroup(
     applyImmediately: true,
     automaticFailoverEnabled: true,
     nodeType: redisConfig.nodeType,
-    parameterGroupName: "default.redis6.x.cluster.on",
+    parameterGroupName: "default.redis7.cluster.on",
     numCacheClusters: redisConfig.numCacheClusters,
     port: 6379,
     subnetGroupName: cacheClusterSubnets.name,
@@ -125,8 +64,10 @@ const redisReplicationGroup = new aws.elasticache.ReplicationGroup(
   }
 );
 
-export const ecrRepositoryName = ecrRepository.name;
-export const ecrRepositoryUrl = ecrRepository.repositoryUrl;
+export const ecrRepositoryName = name;
+export const ecrRepositoryUrl = wiredAwsEcrStackRef.apply((stack) =>
+  stack.getOutput("ecrRepositories").apply((repos) => repos[name])
+);
 export const hasuraEngineSecretId = hasuraEngineStack.getOutput(
   "hasuraEngineSecretId"
 );
