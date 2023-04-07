@@ -35,27 +35,31 @@ steps:
       - cf_export HASURA_ENGINE_SECRET_ID_DEV=$(pulumi stack output hasuraEngineSecretId)
       - cf_export AWS_REDIS_CLUSTER_ENDPOINT_DEV=$(pulumi stack output redisClusterEndpoint)
 
-  buildAppImage:
-    title: "Building App Docker image"
+  prepareArtifacts:
+    type: "parallel"
     stage: devDeploy
-    type: "build"
-    image_name: "${{AWS_ECR_REPO_NAME}}"
-    working_directory: "${{clone}}/app"
-    dockerfile: "Dockerfile"
-    tag: "${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
+    steps:
+      buildAppImage:
+        title: "Building App Docker image"
+        stage: devDeploy
+        type: "build"
+        image_name: "${{AWS_ECR_REPO_NAME}}"
+        working_directory: "${{clone}}/app"
+        dockerfile: "Dockerfile"
+        tag: "${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
 
-  devFetchSecrets:
-    title: "Fetch Dev AWS Secrets"
-    type: aws-secrets-manager
-    stage: devDeploy
-    arguments:
-      AWS_DEFAULT_REGION: "${{AWS_DEFAULT_REGION}}"
-      secrets:
-        - secret_arn: "${{HASURA_ENGINE_SECRET_ID_DEV}}"
-          key: "hasuraAdminSecret"
-          store_in: HASURA_ENGINE_ADMIN_SECRET_DEV
+      fetchDevSecrets:
+        title: "Fetch Dev AWS Secrets"
+        type: aws-secrets-manager
+        stage: devDeploy
+        arguments:
+          AWS_DEFAULT_REGION: "${{AWS_DEFAULT_REGION}}"
+          secrets:
+            - secret_arn: "${{HASURA_ENGINE_SECRET_ID_DEV}}"
+              key: "hasuraAdminSecret"
+              store_in: HASURA_ENGINE_ADMIN_SECRET_DEV
 
-  devDeploy:
+  devHelmInstall:
     title: "Deploy helm to AWS EKS dev env"
     type: helm
     stage: devDeploy
