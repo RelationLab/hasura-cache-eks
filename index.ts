@@ -1,10 +1,10 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as aws from "@pulumi/aws";
 
-const stack = pulumi.getStack();
 const name = "wired-hasura-cache";
+const stack = pulumi.getStack();
 
-const baseTags = {
+const tags = {
   Name: `${name}-${stack}`,
   Project: "Wired.network",
   PulumiStack: `Pulumi-${stack}`,
@@ -13,21 +13,25 @@ const baseTags = {
 const config = new pulumi.Config();
 const maintainer = config.require("maintainer");
 
-const networkingStack = new pulumi.StackReference(
-  `${maintainer}/relation-networking/dev`
+const networkingStackRef = new pulumi.StackReference(
+  `${maintainer}/relation-networking/prod`
 );
 
-const peeredSecurityGroup = aws.ec2.SecurityGroup.get(
-  "eks-vpc-data-vpc-sg",
-  networkingStack.getOutput("peeredSecurityGroupId")
-);
+const securityGroup = new aws.ec2.SecurityGroup(tags.Name, {
+  vpcId: networkingStackRef.getOutput("dataVpcId"),
+  ingress: [
+    {
+      fromPort: 6379,
+      toPort: 6379,
+      protocol: "tcp",
+      cidrBlocks: [
+        networkingStackRef.getOutput("eksVpcCidrBlock"),
+      ],
+    },
+  ],
+});
 
-const wiredAwsEcrStackRef = aws
-  .getRegionOutput()
-  .apply(
-    (res) =>
-      new pulumi.StackReference(`${maintainer}/wired-aws-ecr/${res.name}`)
-  );
+const wiredAwsEcrStackRef = new pulumi.StackReference(`${maintainer}/wired-aws-ecr/prod`)
 
 const hasuraEngineStack = new pulumi.StackReference(
   `${maintainer}/relation-hasura-engine-eks/${stack}`
@@ -43,13 +47,13 @@ if (stack === "prod") {
   redisConfig.numCacheClusters = 4;
 }
 
-const cacheClusterSubnets = new aws.elasticache.SubnetGroup(baseTags.Name, {
-  subnetIds: networkingStack.getOutput("dataVpcPrivateSubnetIds"),
-  tags: baseTags,
+const cacheClusterSubnets = new aws.elasticache.SubnetGroup(tags.Name, {
+  subnetIds: networkingStackRef.getOutput("dataVpcPrivateSubnetIds"),
+  tags,
 });
 
 const redisReplicationGroup = new aws.elasticache.ReplicationGroup(
-  baseTags.Name,
+  tags.Name,
   {
     engine: "redis",
     applyImmediately: true,
@@ -59,17 +63,18 @@ const redisReplicationGroup = new aws.elasticache.ReplicationGroup(
     numCacheClusters: redisConfig.numCacheClusters,
     port: 6379,
     subnetGroupName: cacheClusterSubnets.name,
-    securityGroupIds: [peeredSecurityGroup.id],
+    securityGroupIds: [securityGroup.id],
     description: "hasura cache's redis replication group",
-  }
+    tags,
+  },
 );
 
 export const ecrRepositoryName = name;
-export const ecrRepositoryUrl = wiredAwsEcrStackRef.apply((stack) =>
-  stack.getOutput("ecrRepositories").apply((repos) => repos[name])
-);
-export const hasuraEngineSecretId = hasuraEngineStack.getOutput(
-  "hasuraEngineSecretId"
-);
-export const redisClusterEndpoint =
-  redisReplicationGroup.configurationEndpointAddress;
+export const ecrRepositoryUrl = wiredAwsEcrStackRef
+  .getOutput("ecrRepositories")
+  .apply((repos) => repos[name]);
+
+export const hasuraEngineSecretId = hasuraEngineStack
+  .getOutput("awsSecretId");
+
+export const redisClusterEndpoint = redisReplicationGroup.configurationEndpointAddress;
