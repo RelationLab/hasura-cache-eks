@@ -23,7 +23,7 @@ steps:
   devPulumiUp:
     title: "Pulumi Dev Up"
     stage: devDeploy
-    image: "pulumi/pulumi"
+    image: "pulumi/pulumi-nodejs:latest"
     working_directory: "${{clone}}"
     commands:
       - npm install
@@ -42,7 +42,7 @@ steps:
     image_name: "${{AWS_ECR_REPO_NAME}}"
     working_directory: "${{clone}}/app"
     dockerfile: "Dockerfile"
-    tag: '${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}'
+    tag: "${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
 
   devFetchSecrets:
     title: "Fetch Dev AWS Secrets"
@@ -63,7 +63,7 @@ steps:
     arguments:
       chart_name: helm
       release_name: hasura-cache
-      helm_version: 3.6.1
+      helm_version: 3.9.0
       namespace: dev
       kube_context: wired-eks-prod
       custom_values:
@@ -79,7 +79,7 @@ steps:
 
   stagPulumiUp:
     title: "Pulumi Stag Up"
-    image: "pulumi/pulumi"
+    image: "pulumi/pulumi-nodejs:latest"
     working_directory: "${{clone}}"
     stage: stagDeploy
     commands:
@@ -109,7 +109,7 @@ steps:
     arguments:
       chart_name: helm
       release_name: hasura-cache
-      helm_version: 3.6.1
+      helm_version: 3.9.0
       namespace: stag
       kube_context: wired-eks-prod
       custom_values:
@@ -117,7 +117,7 @@ steps:
         - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
         - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET_STAG}}"
         - "redisCluster_endpoint=${{AWS_REDIS_CLUSTER_ENDPOINT_STAG}}"
-        
+
   askForProdPermission:
     type: pending-approval
     stage: prodDeploy
@@ -125,7 +125,7 @@ steps:
 
   prodPulumiUp:
     title: "Pulumi Prod Up"
-    image: "pulumi/pulumi"
+    image: "pulumi/pulumi-nodejs:latest"
     working_directory: "${{clone}}"
     stage: prodDeploy
     commands:
@@ -146,7 +146,7 @@ steps:
         - secret_arn: "${{HASURA_ENGINE_SECRET_ID_PROD}}"
           key: "hasuraAdminSecret"
           store_in: HASURA_ENGINE_ADMIN_SECRET_PROD
-        
+
   prodDeploy:
     title: "Deploy helm to AWS EKS prod env"
     stage: prodDeploy
@@ -155,7 +155,7 @@ steps:
     arguments:
       chart_name: helm
       release_name: hasura-cache
-      helm_version: 3.6.1
+      helm_version: 3.9.0
       namespace: prod
       kube_context: wired-eks-prod
       custom_values:
