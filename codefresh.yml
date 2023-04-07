@@ -20,8 +20,8 @@ steps:
     git: "github"
     stage: "clone"
 
-  devPulumiUp:
-    title: "Pulumi Dev Up"
+  devPulumiOutputs:
+    title: "Pulumi Outputs Dev"
     stage: devDeploy
     image: "pulumi/pulumi-nodejs:latest"
     working_directory: "${{clone}}"
@@ -29,7 +29,6 @@ steps:
       - npm install
       - pulumi login
       - pulumi stack select dev
-      - pulumi up --non-interactive --yes
       - cf_export AWS_ECR_REPO_NAME=$(pulumi stack output ecrRepositoryName)
       - cf_export AWS_ECR_REPO_URL=$(pulumi stack output ecrRepositoryUrl)
       - cf_export HASURA_ENGINE_SECRET_ID_DEV=$(pulumi stack output hasuraEngineSecretId)
@@ -81,8 +80,8 @@ steps:
     stage: stagDeploy
     title: Deploy to stagging?
 
-  stagPulumiUp:
-    title: "Pulumi Stag Up"
+  stagPulumiOutputs:
+    title: "Pulumi Outputs Stag"
     image: "pulumi/pulumi-nodejs:latest"
     working_directory: "${{clone}}"
     stage: stagDeploy
@@ -90,7 +89,6 @@ steps:
       - npm install
       - pulumi login
       - pulumi stack select stag
-      - pulumi up --non-interactive --yes
       - cf_export HASURA_ENGINE_SECRET_ID_STAG=$(pulumi stack output hasuraEngineSecretId)
       - cf_export AWS_REDIS_CLUSTER_ENDPOINT_STAG=$(pulumi stack output redisClusterEndpoint)
 
@@ -127,8 +125,8 @@ steps:
     stage: prodDeploy
     title: Deploy to production?
 
-  prodPulumiUp:
-    title: "Pulumi Prod Up"
+  prodPulumiOutputs:
+    title: "Pulumi Outputs Prod"
     image: "pulumi/pulumi-nodejs:latest"
     working_directory: "${{clone}}"
     stage: prodDeploy
@@ -136,7 +134,6 @@ steps:
       - npm install
       - pulumi login
       - pulumi stack select prod
-      - pulumi up --non-interactive --yes
       - cf_export HASURA_ENGINE_SECRET_ID_PROD=$(pulumi stack output hasuraEngineSecretId)
       - cf_export AWS_REDIS_CLUSTER_ENDPOINT_PROD=$(pulumi stack output redisClusterEndpoint)
 
