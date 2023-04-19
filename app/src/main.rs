@@ -232,19 +232,25 @@ async fn private_post_graphql(
 
 #[tokio::main]
 async fn main() {
+    let cache_live = if let Ok("production") = env::var("APP_ENV").as_ref().map(|v| v.as_str()) {
+        172800
+    } else {
+        300
+    };
+
     let redis_host = env::var("REDIS_HOST").expect("REDIS_HOST env var should be specified");
     let redis_cluster = ClusterClient::new(vec![format!("redis://{}/", redis_host)])
         .expect("Can't open redis cluster client");
 
     let hasura_engine_reverse_proxy = Arc::new(HasuraReverseProxy::new());
 
-    let (tx, rx) = bounded::<(ClusterConnection, String, String)>(2048);
+    let (tx, rx) = bounded::<(ClusterConnection, String, String)>(1024);
 
     for _ in 0..256 {
         let rx = rx.clone();
         tokio::spawn(async move {
             while let Ok((mut conn, hash, cache)) = rx.recv().await {
-                conn.set_ex::<_, _, ()>(hash, cache, 172800).unwrap();
+                conn.set_ex::<_, _, ()>(hash, cache, cache_live).unwrap();
             }
         });
     }

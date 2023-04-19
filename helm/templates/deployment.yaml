@@ -34,6 +34,8 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
+            - name: APP_ENV
+              value: {{ .Values.app.env | quote }}
             - name: REDIS_HOST
               value: {{ .Values.redisCluster.endpoint | quote }}
             - name: HASURA_ENGINE_HOST
