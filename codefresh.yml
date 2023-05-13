@@ -72,6 +72,7 @@ steps:
       custom_values:
         - "image_repository=${{AWS_ECR_REPO_URL}}"
         - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
+        - "app_cacheDisabled=${{APP_CACHE_DISABLED}}"
         - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET_DEV}}"
         - "redisCluster_endpoint=${{AWS_REDIS_CLUSTER_ENDPOINT_DEV}}"
 
@@ -117,6 +118,7 @@ steps:
       custom_values:
         - "image_repository=${{AWS_ECR_REPO_URL}}"
         - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
+        - "app_cacheDisabled=${{APP_CACHE_DISABLED}}"
         - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET_STAG}}"
         - "redisCluster_endpoint=${{AWS_REDIS_CLUSTER_ENDPOINT_STAG}}"
 
@@ -163,5 +165,6 @@ steps:
         - "image_repository=${{AWS_ECR_REPO_URL}}"
         - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
         - "app_env=production"
+        - "app_cacheDisabled=${{APP_CACHE_DISABLED}}"
         - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET_PROD}}"
         - "redisCluster_endpoint=${{AWS_REDIS_CLUSTER_ENDPOINT_PROD}}"

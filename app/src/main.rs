@@ -175,12 +175,14 @@ where
 }
 
 async fn post_graphql(
+    cache_disabled: bool,
     graphql: GraphQLCache,
     redis_cluster: ClusterClient,
     proxy: Arc<HasuraReverseProxy>,
     tx: Sender<(ClusterConnection, String, String)>,
 ) -> Result<Json<Value>, AppError> {
-    if graphql.req.cached() {
+    if graphql.req.cached() && !cache_disabled
+    {
         let mut redis_conn = redis_cluster.connect()?;
 
         let cache: Option<String> = redis_conn.get(&graphql.hash)?;
@@ -209,6 +211,7 @@ async fn post_graphql(
 }
 
 async fn public_post_graphql(
+    Extension(cache_disabled): Extension<bool>,
     Extension(tx): Extension<Sender<(ClusterConnection, String, String)>>,
     Extension(redis_cluster): Extension<ClusterClient>,
     Extension(proxy): Extension<Arc<HasuraReverseProxy>>,
@@ -218,20 +221,23 @@ async fn public_post_graphql(
         return Err(AppError::Privacy);
     }
 
-    post_graphql(graphql, redis_cluster, proxy, tx).await
+    post_graphql(cache_disabled, graphql, redis_cluster, proxy, tx).await
 }
 
 async fn private_post_graphql(
+    Extension(cache_disabled): Extension<bool>,
     Extension(tx): Extension<Sender<(ClusterConnection, String, String)>>,
     Extension(redis_cluster): Extension<ClusterClient>,
     Extension(proxy): Extension<Arc<HasuraReverseProxy>>,
     graphql: GraphQLCache,
 ) -> Result<Json<Value>, AppError> {
-    post_graphql(graphql, redis_cluster, proxy, tx).await
+    post_graphql(cache_disabled, graphql, redis_cluster, proxy, tx).await
 }
 
 #[tokio::main]
 async fn main() {
+    let cache_disabled = env::var("APP_CACHE_DISABLED").ok() == Some(String::from("true"));
+
     let cache_live = if let Ok("production") = env::var("APP_ENV").as_ref().map(|v| v.as_str()) {
         172800
     } else {
@@ -261,6 +267,7 @@ async fn main() {
         .route("/public/v1/graphql", post(public_post_graphql))
         .layer(Extension(tx))
         .layer(Extension(redis_cluster))
+        .layer(Extension(cache_disabled))
         .layer(Extension(hasura_engine_reverse_proxy));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 80));

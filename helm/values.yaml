@@ -11,10 +11,11 @@ image:
   tag: "latest"
 
 app:
-  env: "dev"
+  env: dev
+  cacheDisabled: false
 
 hasuraEngine:
-  host: "hasura-engine"
+  host: hasura-engine
   port: 8080
   adminSecret: ""
 

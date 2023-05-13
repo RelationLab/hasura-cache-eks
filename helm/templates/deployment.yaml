@@ -36,6 +36,8 @@ spec:
           env:
             - name: APP_ENV
               value: {{ .Values.app.env | quote }}
+            - name: APP_CACHE_DISABLED
+              value: {{ .Values.app.cacheDisabled | quote }}
             - name: REDIS_HOST
               value: {{ .Values.redisCluster.endpoint | quote }}
             - name: HASURA_ENGINE_HOST
