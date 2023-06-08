@@ -14,15 +14,13 @@ use axum::{
 use bytes::BytesMut;
 use futures_util::TryFutureExt;
 use hmac_sha256::Hash;
-use r2d2::ManageConnection;
-use redis::{
-    cluster::{ClusterClient, ClusterConnection},
-    Commands, RedisError,
-};
+use log::error;
+use redis::{cluster::ClusterClient, cluster_async::ClusterConnection, AsyncCommands, RedisError};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+const CACHE_ALIVE_SECONDS: usize = 60;
 const CACHED_OPERATIONS: [&str; 1] = ["AddressesWithLabels"];
 const PUBLIC_OPERATIONS: [&str; 4] = [
     "FriendsRequestAction",
@@ -39,6 +37,8 @@ enum AppError {
     Redis(#[from] RedisError),
     #[error("reqwest error: `{0}`")]
     Reqwest(#[from] reqwest::Error),
+    #[error("serde json error: `{0}`")]
+    SerdeJson(#[from] serde_json::Error),
 }
 
 impl IntoResponse for AppError {
@@ -47,9 +47,16 @@ impl IntoResponse for AppError {
             AppError::Privacy => (StatusCode::FORBIDDEN, self.to_string()),
             AppError::Redis(ref error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("code: {:?}, category: {}", error.code(), error.category()),
+                format!(
+                    "redis error, code: {:?}, category: {}",
+                    error.code(),
+                    error.category()
+                ),
             ),
             AppError::Reqwest(ref error) => (StatusCode::BAD_GATEWAY, error.to_string()),
+            AppError::SerdeJson(ref error) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+            }
         };
         let body = Json(json!({
             "error": error_message,
@@ -120,8 +127,8 @@ struct GraphQLRequest {
 }
 
 impl GraphQLRequest {
-    fn as_json(&self) -> Value {
-        serde_json::to_value(self).unwrap()
+    fn try_as_json(&self) -> Result<Value, AppError> {
+        serde_json::to_value(self).map_err(Into::into)
     }
 
     fn cached(&self) -> bool {
@@ -181,28 +188,32 @@ async fn post_graphql(
     proxy: Arc<HasuraReverseProxy>,
     tx: Sender<(ClusterConnection, String, String)>,
 ) -> Result<Json<Value>, AppError> {
-    if graphql.req.cached() && !cache_disabled
-    {
-        let mut redis_conn = redis_cluster.connect()?;
+    if graphql.req.cached() && !cache_disabled {
+        let mut redis_conn = redis_cluster.get_async_connection().await?;
 
-        let cache: Option<String> = redis_conn.get(&graphql.hash)?;
+        let cache: Option<String> = redis_conn.get(&graphql.hash).await?;
 
         if let Some(cache) = cache {
-            Ok(Json(serde_json::from_str(&cache).unwrap()))
+            Ok(Json(serde_json::from_str(&cache)?))
         } else {
             let response = proxy
-                .post_graphql(graphql.post_headers, graphql.req.as_json())
+                .post_graphql(graphql.post_headers, graphql.req.try_as_json()?)
                 .await?;
             let json_response = response.json::<Value>().await?;
             if json_response.pointer("/errors").is_none() {
-                let cached = serde_json::to_string(&json_response).unwrap();
-                tx.send((redis_conn, graphql.hash, cached)).await.unwrap();
+                tx.send((
+                    redis_conn,
+                    graphql.hash,
+                    serde_json::to_string(&json_response)?,
+                ))
+                .await
+                .unwrap();
             }
             Ok(Json(json_response))
         }
     } else {
         proxy
-            .post_graphql(graphql.post_headers, graphql.req.as_json())
+            .post_graphql(graphql.post_headers, graphql.req.try_as_json()?)
             .and_then(|response| response.json::<Value>())
             .await
             .map_err(Into::into)
@@ -236,13 +247,9 @@ async fn private_post_graphql(
 
 #[tokio::main]
 async fn main() {
-    let cache_disabled = env::var("APP_CACHE_DISABLED").ok() == Some(String::from("true"));
+    env_logger::init();
 
-    let cache_live = if let Ok("production") = env::var("APP_ENV").as_ref().map(|v| v.as_str()) {
-        172800
-    } else {
-        300
-    };
+    let cache_disabled = env::var("APP_CACHE_DISABLED").ok() == Some(String::from("true"));
 
     let redis_host = env::var("REDIS_HOST").expect("REDIS_HOST env var should be specified");
     let redis_cluster = ClusterClient::new(vec![format!("redis://{}/", redis_host)])
@@ -252,11 +259,16 @@ async fn main() {
 
     let (tx, rx) = bounded::<(ClusterConnection, String, String)>(1024);
 
-    for _ in 0..256 {
+    for _ in 0..64 {
         let rx = rx.clone();
         tokio::spawn(async move {
             while let Ok((mut conn, hash, cache)) = rx.recv().await {
-                conn.set_ex::<_, _, ()>(hash, cache, cache_live).unwrap();
+                if let Err(err) = conn
+                    .set_ex::<_, _, ()>(hash, cache, CACHE_ALIVE_SECONDS)
+                    .await
+                {
+                    error!("failed to set cache, error: {:?}", err);
+                }
             }
         });
     }

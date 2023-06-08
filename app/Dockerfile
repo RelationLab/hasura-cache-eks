@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef:latest as chef
+FROM lukemathwalker/cargo-chef:latest-rust-bullseye as chef
 WORKDIR /app
 
 FROM chef as planner
@@ -12,15 +12,14 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 # Build our project
-RUN cargo build --release --bin api-cache-backend
+RUN cargo build --release --bin app
 
 FROM debian:bullseye-slim AS runtime
 WORKDIR /app
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends openssl \
-    # Clean up
     && apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/api-cache-backend api-cache-backend
-ENTRYPOINT ["./api-cache-backend"]
+COPY --from=builder /app/target/release/app app
+ENTRYPOINT ["./app"]

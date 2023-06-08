@@ -34,8 +34,6 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
-            - name: APP_ENV
-              value: {{ .Values.app.env | quote }}
             - name: APP_CACHE_DISABLED
               value: {{ .Values.app.cacheDisabled | quote }}
             - name: REDIS_HOST
@@ -46,6 +44,8 @@ spec:
               value: {{ .Values.hasuraEngine.port | quote }}
             - name: HASURA_ENGINE_ADMIN_SECRET
               value: {{ .Values.hasuraEngine.adminSecret | quote }}
+            - name: RUST_LOG
+              value: "app=info"
           ports:
             - name: http
               containerPort: 80
