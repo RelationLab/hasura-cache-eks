@@ -37,7 +37,9 @@ spec:
             - name: APP_CACHE_DISABLED
               value: {{ .Values.app.cacheDisabled | quote }}
             - name: REDIS_HOST
-              value: {{ .Values.redisCluster.endpoint | quote }}
+              value: {{ .Values.redis.endpoint | quote }}
+            - name: REDIS_IS_CLUSTER
+              value: {{ .Values.redis.cluster | quote }}
             - name: HASURA_ENGINE_HOST
               value: {{ .Values.hasuraEngine.host | quote }}
             - name: HASURA_ENGINE_PORT

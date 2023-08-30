@@ -1,4 +1,4 @@
-use std::{env, net::SocketAddr, sync::Arc};
+use std::{env, net::SocketAddr, str::FromStr, sync::Arc};
 
 use async_channel::{bounded, Sender};
 use async_trait::async_trait;
@@ -15,8 +15,11 @@ use bytes::BytesMut;
 use futures_util::TryFutureExt;
 use hmac_sha256::Hash;
 use log::error;
-use redis::{cluster::ClusterClient, cluster_async::ClusterConnection, AsyncCommands, RedisError};
-use reqwest::Client;
+use redis::aio::Connection;
+use redis::{
+    cluster::ClusterClient, cluster_async::ClusterConnection, AsyncCommands, Client,
+    FromRedisValue, RedisError, RedisFuture, RedisResult, ToRedisArgs,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -28,6 +31,59 @@ const PUBLIC_OPERATIONS: [&str; 4] = [
     "FriendsRequestCountAction",
     "LabelDescribe",
 ];
+
+#[derive(Clone)]
+enum RedisClient {
+    Singleton(Client),
+    Cluster(ClusterClient),
+}
+
+enum RedisConnection {
+    Cluster(ClusterConnection),
+    Singleton(Connection),
+}
+
+impl RedisConnection {
+    fn get<'a, K: ToRedisArgs + Send + Sync + 'a, RV>(&'a mut self, key: K) -> RedisFuture<'a, RV>
+    where
+        RV: FromRedisValue,
+    {
+        match *self {
+            RedisConnection::Cluster(ref mut conn) => conn.get(key),
+            RedisConnection::Singleton(ref mut conn) => conn.get(key),
+        }
+    }
+
+    fn set_ex<'a, K: ToRedisArgs + Send + Sync + 'a, V: ToRedisArgs + Send + Sync + 'a, RV>(
+        &'a mut self,
+        key: K,
+        value: V,
+        seconds: usize,
+    ) -> RedisFuture<'a, RV>
+    where
+        RV: FromRedisValue,
+    {
+        match *self {
+            RedisConnection::Cluster(ref mut conn) => conn.set_ex(key, value, seconds),
+            RedisConnection::Singleton(ref mut conn) => conn.set_ex(key, value, seconds),
+        }
+    }
+}
+
+impl RedisClient {
+    async fn get_async_connection(&self) -> RedisResult<RedisConnection> {
+        match *self {
+            RedisClient::Cluster(ref cluster) => cluster
+                .get_async_connection()
+                .await
+                .map(RedisConnection::Cluster),
+            RedisClient::Singleton(ref singleton) => singleton
+                .get_async_connection()
+                .await
+                .map(RedisConnection::Singleton),
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 enum AppError {
@@ -69,7 +125,7 @@ struct HasuraReverseProxy {
     host: String,
     port: u16,
     admin_secret: String,
-    client: Client,
+    client: reqwest::Client,
 }
 
 impl HasuraReverseProxy {
@@ -89,7 +145,7 @@ impl HasuraReverseProxy {
             host,
             port,
             admin_secret,
-            client: Client::new(),
+            client: reqwest::Client::new(),
         }
     }
 
@@ -184,12 +240,12 @@ where
 async fn post_graphql(
     cache_disabled: bool,
     graphql: GraphQLCache,
-    redis_cluster: ClusterClient,
+    redis_client: RedisClient,
     proxy: Arc<HasuraReverseProxy>,
-    tx: Sender<(ClusterConnection, String, String)>,
+    tx: Sender<(RedisConnection, String, String)>,
 ) -> Result<Json<Value>, AppError> {
     if graphql.req.cached() && !cache_disabled {
-        let mut redis_conn = redis_cluster.get_async_connection().await?;
+        let mut redis_conn = redis_client.get_async_connection().await?;
 
         let cache: Option<String> = redis_conn.get(&graphql.hash).await?;
 
@@ -223,8 +279,8 @@ async fn post_graphql(
 
 async fn public_post_graphql(
     Extension(cache_disabled): Extension<bool>,
-    Extension(tx): Extension<Sender<(ClusterConnection, String, String)>>,
-    Extension(redis_cluster): Extension<ClusterClient>,
+    Extension(tx): Extension<Sender<(RedisConnection, String, String)>>,
+    Extension(redis_client): Extension<RedisClient>,
     Extension(proxy): Extension<Arc<HasuraReverseProxy>>,
     graphql: GraphQLCache,
 ) -> Result<Json<Value>, AppError> {
@@ -232,17 +288,17 @@ async fn public_post_graphql(
         return Err(AppError::Privacy);
     }
 
-    post_graphql(cache_disabled, graphql, redis_cluster, proxy, tx).await
+    post_graphql(cache_disabled, graphql, redis_client, proxy, tx).await
 }
 
 async fn private_post_graphql(
     Extension(cache_disabled): Extension<bool>,
-    Extension(tx): Extension<Sender<(ClusterConnection, String, String)>>,
-    Extension(redis_cluster): Extension<ClusterClient>,
+    Extension(tx): Extension<Sender<(RedisConnection, String, String)>>,
+    Extension(redis_client): Extension<RedisClient>,
     Extension(proxy): Extension<Arc<HasuraReverseProxy>>,
     graphql: GraphQLCache,
 ) -> Result<Json<Value>, AppError> {
-    post_graphql(cache_disabled, graphql, redis_cluster, proxy, tx).await
+    post_graphql(cache_disabled, graphql, redis_client, proxy, tx).await
 }
 
 #[tokio::main]
@@ -252,12 +308,25 @@ async fn main() {
     let cache_disabled = env::var("APP_CACHE_DISABLED").ok() == Some(String::from("true"));
 
     let redis_host = env::var("REDIS_HOST").expect("REDIS_HOST env var should be specified");
-    let redis_cluster = ClusterClient::new(vec![format!("redis://{}/", redis_host)])
-        .expect("Can't open redis cluster client");
+
+    let redis_is_cluster = env::var("REDIS_IS_CLUSTER")
+        .map_err(anyhow::Error::from)
+        .and_then(|env| Ok(bool::from_str(&env)?))
+        .expect("REDIS_IS_CLUSTER env var should be specified or must be a value boolean");
+
+    let redis_client = if redis_is_cluster {
+        ClusterClient::new(vec![format!("redis://{}/", redis_host)])
+            .map(RedisClient::Cluster)
+            .expect("Can't open redis cluster client")
+    } else {
+        Client::open(format!("redis://{}/", redis_host))
+            .map(RedisClient::Singleton)
+            .expect("Can't open redis client")
+    };
 
     let hasura_engine_reverse_proxy = Arc::new(HasuraReverseProxy::new());
 
-    let (tx, rx) = bounded::<(ClusterConnection, String, String)>(1024);
+    let (tx, rx) = bounded::<(RedisConnection, String, String)>(1024);
 
     for _ in 0..64 {
         let rx = rx.clone();
@@ -278,7 +347,7 @@ async fn main() {
         .route("/v1/graphql", post(private_post_graphql))
         .route("/public/v1/graphql", post(public_post_graphql))
         .layer(Extension(tx))
-        .layer(Extension(redis_cluster))
+        .layer(Extension(redis_client))
         .layer(Extension(cache_disabled))
         .layer(Extension(hasura_engine_reverse_proxy));
 

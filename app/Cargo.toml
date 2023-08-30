@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0"
 async-channel = "1.7"
 axum = { version = "0.6", features = ["json"] }
 async-trait = "0.1"

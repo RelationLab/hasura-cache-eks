@@ -18,8 +18,9 @@ hasuraEngine:
   port: 8080
   adminSecret: ""
 
-redisCluster:
+redis:
   endpoint: ""
+  cluster: "true"
 
 imagePullSecrets: []
 nameOverride: ""

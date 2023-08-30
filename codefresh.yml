@@ -32,7 +32,7 @@ steps:
       - cf_export AWS_ECR_REPO_NAME=$(pulumi stack output ecrRepositoryName)
       - cf_export AWS_ECR_REPO_URL=$(pulumi stack output ecrRepositoryUrl)
       - cf_export HASURA_ENGINE_SECRET_ID_DEV=$(pulumi stack output hasuraEngineSecretId)
-      - cf_export AWS_REDIS_CLUSTER_ENDPOINT_DEV=$(pulumi stack output redisClusterEndpoint)
+      - cf_export AWS_REDIS_ENDPOINT_DEV=$(pulumi stack output redisEndpoint)
 
   prepareArtifacts:
     type: "parallel"
@@ -74,7 +74,8 @@ steps:
         - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
         - "app_cacheDisabled=${{APP_CACHE_DISABLED}}"
         - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET_DEV}}"
-        - "redisCluster_endpoint=${{AWS_REDIS_CLUSTER_ENDPOINT_DEV}}"
+        - "redis_cluster=false"
+        - "redis_endpoint=${{AWS_REDIS_ENDPOINT_DEV}}"
 
   askForStagPermission:
     type: pending-approval
@@ -91,7 +92,7 @@ steps:
       - pulumi login
       - pulumi stack select stag
       - cf_export HASURA_ENGINE_SECRET_ID_STAG=$(pulumi stack output hasuraEngineSecretId)
-      - cf_export AWS_REDIS_CLUSTER_ENDPOINT_STAG=$(pulumi stack output redisClusterEndpoint)
+      - cf_export AWS_REDIS_ENDPOINT_STAG=$(pulumi stack output redisEndpoint)
 
   stagFetchSecrets:
     title: "Fetch Stag AWS Secrets"
@@ -120,7 +121,7 @@ steps:
         - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
         - "app_cacheDisabled=${{APP_CACHE_DISABLED}}"
         - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET_STAG}}"
-        - "redisCluster_endpoint=${{AWS_REDIS_CLUSTER_ENDPOINT_STAG}}"
+        - "redis_endpoint=${{AWS_REDIS_ENDPOINT_STAG}}"
 
   askForProdPermission:
     type: pending-approval
@@ -137,7 +138,7 @@ steps:
       - pulumi login
       - pulumi stack select prod
       - cf_export HASURA_ENGINE_SECRET_ID_PROD=$(pulumi stack output hasuraEngineSecretId)
-      - cf_export AWS_REDIS_CLUSTER_ENDPOINT_PROD=$(pulumi stack output redisClusterEndpoint)
+      - cf_export AWS_REDIS_ENDPOINT_PROD=$(pulumi stack output redisEndpoint)
 
   prodFetchSecrets:
     title: "Fetch Prod AWS Secrets"
@@ -166,4 +167,4 @@ steps:
         - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
         - "app_cacheDisabled=${{APP_CACHE_DISABLED}}"
         - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET_PROD}}"
-        - "redisCluster_endpoint=${{AWS_REDIS_CLUSTER_ENDPOINT_PROD}}"
+        - "redis_endpoint=${{AWS_REDIS_ENDPOINT_PROD}}"
