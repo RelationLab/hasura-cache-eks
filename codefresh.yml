@@ -148,7 +148,10 @@ steps:
       - pulumi login
       - pulumi stack select prod
       - cf_export HASURA_ENGINE_SECRET_ID_PROD=$(pulumi stack output hasuraEngineSecretId)
+      - cf_export AWS_SERVICE_ACCOUNT_NAME_PROD=$(pulumi stack output awsServiceAccountName)
       - cf_export AWS_REDIS_ENDPOINT_PROD=$(pulumi stack output redisEndpoint)
+      - cf_export AWS_REDIS_KMS_ENCRYPTED_AUTH_TOKEN_PROD=$(pulumi stack output kmsEncryptedRedisAuthToken)
+      - cf_export HASURA_ENGINE_SECRET_ID_PROD=$(pulumi stack output hasuraEngineSecretId)
 
   prodFetchSecrets:
     title: "Fetch Prod AWS Secrets"
@@ -178,3 +181,5 @@ steps:
         - "app_cacheDisabled=${{APP_CACHE_DISABLED}}"
         - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET_PROD}}"
         - "redis_endpoint=${{AWS_REDIS_ENDPOINT_PROD}}"
+        - "redis_encryptedAuthToken=${{AWS_REDIS_KMS_ENCRYPTED_AUTH_TOKEN_PROD}}"
+        - "serviceAccount_name=${{AWS_SERVICE_ACCOUNT_NAME_PROD}}"

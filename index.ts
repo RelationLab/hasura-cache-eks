@@ -164,10 +164,10 @@ const redisReplicationGroup = new aws.elasticache.ReplicationGroup(
     transitEncryptionEnabled: true,
     securityGroupIds: [securityGroup.id],
     multiAzEnabled: redisConfig.clusterMode,
+    numNodeGroups: redisConfig.numNodeGroups,
     subnetGroupName: cacheClusterSubnets.name,
-    numNodeGroups: redisConfig.clusterMode ? 2 : 1,
     automaticFailoverEnabled: redisConfig.clusterMode,
-    replicasPerNodeGroup: redisConfig.clusterMode ? 2 : 0,
+    replicasPerNodeGroup: redisConfig.clusterMode ? 1 : 0,
     parameterGroupName: redisConfig.clusterMode
       ? "default.redis7.cluster.on"
       : "default.redis7",

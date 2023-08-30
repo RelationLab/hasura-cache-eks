@@ -1,6 +1,5 @@
 config:
   aws:region: ap-southeast-1
   relation-hasura-cache-eks:hasuraEngineServiceName: hasura-engine
-  relation-hasura-cache-eks:maintainer: Matrix-Zhang
   relation-hasura-cache-eks:redisAuthToken:
     secure: AAABAIOlvz6WcblBNupQxGQ3zLkHPMM46DzaqPbL3J3fDjTKppx2uBImuhaAGUCs
