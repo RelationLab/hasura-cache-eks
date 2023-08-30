@@ -917,6 +917,7 @@ dependencies = [
  "futures-util",
  "itoa",
  "log",
+ "native-tls",
  "percent-encoding",
  "pin-project-lite",
  "rand",
@@ -924,6 +925,7 @@ dependencies = [
  "sha1_smol",
  "socket2 0.4.9",
  "tokio",
+ "tokio-native-tls",
  "tokio-util",
  "url",
 ]
