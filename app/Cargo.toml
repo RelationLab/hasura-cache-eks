@@ -11,7 +11,7 @@ axum = { version = "0.6", features = ["json"] }
 async-trait = "0.1"
 bytes = "1.1"
 env_logger = "0.10"
-faster-hex = "0.6"
+faster-hex = "0.8"
 futures-util = "0.3"
 hmac-sha256 = "1.1"
 log = "0.4"
