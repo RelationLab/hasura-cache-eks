@@ -72,7 +72,7 @@ const encryptedRedisAuthToken = new aws.kms.Ciphertext(
   }
 );
 
-const serviceAccountName = `${name}-sa`;
+export const awsServiceAccountName = `${name}-sa`;
 
 const assumeRolePolicy = aws.iam.getPolicyDocumentOutput({
   version: "2012-10-17",
@@ -90,7 +90,7 @@ const assumeRolePolicy = aws.iam.getPolicyDocumentOutput({
         {
           test: "StringEquals",
           values: [
-            pulumi.interpolate`system:serviceaccount:${stack}:${serviceAccountName}`,
+            pulumi.interpolate`system:serviceaccount:${stack}:${awsServiceAccountName}`,
           ],
           variable: pulumi.interpolate`${wiredEksStackRef.getOutput(
             "eksClusterOidcProviderURL"
@@ -133,9 +133,9 @@ const iamRole = new aws.iam.Role(`${tags.Name}-iam-role`, {
   ],
 });
 
-new k8s.core.v1.ServiceAccount(serviceAccountName, {
+new k8s.core.v1.ServiceAccount(awsServiceAccountName, {
   metadata: {
-    name: serviceAccountName,
+    name: awsServiceAccountName,
     namespace: stack,
     annotations: {
       "eks.amazonaws.com/role-arn": iamRole.arn,
