@@ -33,6 +33,7 @@ steps:
       - cf_export AWS_ECR_REPO_URL=$(pulumi stack output ecrRepositoryUrl)
       - cf_export HASURA_ENGINE_SECRET_ID_DEV=$(pulumi stack output hasuraEngineSecretId)
       - cf_export AWS_REDIS_ENDPOINT_DEV=$(pulumi stack output redisEndpoint)
+      - cf_export AWS_REDIS_KMS_ENCRYPTED_AUTH_TOKEN_DEV=$(pulumi stack output kmsEncryptedRedisAuthToken)
 
   prepareArtifacts:
     type: "parallel"
@@ -76,6 +77,7 @@ steps:
         - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET_DEV}}"
         - "redis_cluster=false"
         - "redis_endpoint=${{AWS_REDIS_ENDPOINT_DEV}}"
+        - "redis_encryptedAuthToken=${{AWS_REDIS_KMS_ENCRYPTED_AUTH_TOKEN_DEV}}"
 
   askForStagPermission:
     type: pending-approval

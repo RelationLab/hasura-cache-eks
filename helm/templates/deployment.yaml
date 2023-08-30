@@ -36,16 +36,18 @@ spec:
           env:
             - name: APP_CACHE_DISABLED
               value: {{ .Values.app.cacheDisabled | quote }}
-            - name: REDIS_HOST
-              value: {{ .Values.redis.endpoint | quote }}
-            - name: REDIS_IS_CLUSTER
-              value: {{ .Values.redis.cluster | quote }}
             - name: HASURA_ENGINE_HOST
               value: {{ .Values.hasuraEngine.host | quote }}
             - name: HASURA_ENGINE_PORT
               value: {{ .Values.hasuraEngine.port | quote }}
             - name: HASURA_ENGINE_ADMIN_SECRET
               value: {{ .Values.hasuraEngine.adminSecret | quote }}
+            - name: KMS_ENCRYPTED_REDIS_AUTH_TOKEN
+              value: {{ .Values.redis.encryptedAuthToken | quote }}
+            - name: REDIS_HOST
+              value: {{ .Values.redis.endpoint | quote }}
+            - name: REDIS_IS_CLUSTER
+              value: {{ .Values.redis.cluster | quote }}
             - name: RUST_LOG
               value: "app=info"
           ports:

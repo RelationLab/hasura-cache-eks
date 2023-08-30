@@ -21,6 +21,7 @@ hasuraEngine:
 redis:
   endpoint: ""
   cluster: "true"
+  encryptedAuthToken: ""
 
 imagePullSecrets: []
 nameOverride: ""

@@ -309,17 +309,25 @@ async fn main() {
 
     let redis_host = env::var("REDIS_HOST").expect("REDIS_HOST env var should be specified");
 
+    let redis_auth_token = env::var("REDIS_AUTH_TOKEN").unwrap_or_default();
+
     let redis_is_cluster = env::var("REDIS_IS_CLUSTER")
         .map_err(anyhow::Error::from)
         .and_then(|env| Ok(bool::from_str(&env)?))
         .expect("REDIS_IS_CLUSTER env var should be specified or must be a value boolean");
 
+    let redis_url = if redis_auth_token.is_empty() {
+        format!("redis://{redis_host}/")
+    } else {
+        format!("rediss://:{redis_auth_token}@{redis_host}/")
+    };
+
     let redis_client = if redis_is_cluster {
-        ClusterClient::new(vec![format!("redis://{}/", redis_host)])
+        ClusterClient::new(vec![redis_url])
             .map(RedisClient::Cluster)
             .expect("Can't open redis cluster client")
     } else {
-        Client::open(format!("redis://{}/", redis_host))
+        Client::open(redis_url)
             .map(RedisClient::Singleton)
             .expect("Can't open redis client")
     };
