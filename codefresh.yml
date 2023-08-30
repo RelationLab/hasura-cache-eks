@@ -31,10 +31,10 @@ steps:
       - pulumi stack select dev
       - cf_export AWS_ECR_REPO_NAME=$(pulumi stack output ecrRepositoryName)
       - cf_export AWS_ECR_REPO_URL=$(pulumi stack output ecrRepositoryUrl)
-      - cf_export AWS_SERVICE_ACCOUNT_NAME=$(pulumi stack output awsServiceAccountName)
-      - cf_export HASURA_ENGINE_SECRET_ID_DEV=$(pulumi stack output hasuraEngineSecretId)
+      - cf_export AWS_SERVICE_ACCOUNT_NAME_DEV=$(pulumi stack output awsServiceAccountName)
       - cf_export AWS_REDIS_ENDPOINT_DEV=$(pulumi stack output redisEndpoint)
       - cf_export AWS_REDIS_KMS_ENCRYPTED_AUTH_TOKEN_DEV=$(pulumi stack output kmsEncryptedRedisAuthToken)
+      - cf_export HASURA_ENGINE_SECRET_ID_DEV=$(pulumi stack output hasuraEngineSecretId)
 
   prepareArtifacts:
     type: "parallel"
@@ -79,7 +79,7 @@ steps:
         - "redis_cluster=false"
         - "redis_endpoint=${{AWS_REDIS_ENDPOINT_DEV}}"
         - "redis_encryptedAuthToken=${{AWS_REDIS_KMS_ENCRYPTED_AUTH_TOKEN_DEV}}"
-        - "serviceAccount_name=${{AWS_SERVICE_ACCOUNT_NAME}}"
+        - "serviceAccount_name=${{AWS_SERVICE_ACCOUNT_NAME_DEV}}"
 
   askForStagPermission:
     type: pending-approval
@@ -95,8 +95,11 @@ steps:
       - npm install
       - pulumi login
       - pulumi stack select stag
-      - cf_export HASURA_ENGINE_SECRET_ID_STAG=$(pulumi stack output hasuraEngineSecretId)
       - cf_export AWS_REDIS_ENDPOINT_STAG=$(pulumi stack output redisEndpoint)
+      - cf_export AWS_SERVICE_ACCOUNT_NAME_STAG=$(pulumi stack output awsServiceAccountName)
+      - cf_export AWS_REDIS_ENDPOINT_STAG=$(pulumi stack output redisEndpoint)
+      - cf_export AWS_REDIS_KMS_ENCRYPTED_AUTH_TOKEN_STAG=$(pulumi stack output kmsEncryptedRedisAuthToken)
+      - cf_export HASURA_ENGINE_SECRET_ID_STAG=$(pulumi stack output hasuraEngineSecretId)
 
   stagFetchSecrets:
     title: "Fetch Stag AWS Secrets"
@@ -125,7 +128,10 @@ steps:
         - "image_tag=${{CF_BRANCH_TAG_NORMALIZED}}-${{CF_SHORT_REVISION}}"
         - "app_cacheDisabled=${{APP_CACHE_DISABLED}}"
         - "hasuraEngine_adminSecret=${{HASURA_ENGINE_ADMIN_SECRET_STAG}}"
+        - "redis_cluster=false"
         - "redis_endpoint=${{AWS_REDIS_ENDPOINT_STAG}}"
+        - "redis_encryptedAuthToken=${{AWS_REDIS_KMS_ENCRYPTED_AUTH_TOKEN_STAG}}"
+        - "serviceAccount_name=${{AWS_SERVICE_ACCOUNT_NAME_STAG}}"
 
   askForProdPermission:
     type: pending-approval

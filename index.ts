@@ -49,8 +49,9 @@ const redisConfig = {
   clusterMode: false,
   nodeType: "cache.t3.small",
 };
-
-if (stack === "prod") {
+if (stack === "stag") {
+  redisConfig.nodeType = "cache.t3.medium";
+} else if (stack === "prod") {
   redisConfig.clusterMode = true;
   redisConfig.numNodeGroups = 2;
   redisConfig.nodeType = "cache.r6g.xlarge";
